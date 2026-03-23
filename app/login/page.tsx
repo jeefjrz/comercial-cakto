@@ -29,15 +29,20 @@ export default function LoginPage() {
   const handleLogin = async () => {
     if (!form.email || !form.password) { toast('Preencha email e senha.', 'error'); return; }
     setIsLoading(true);
-    const { error } = await signIn(form.email, form.password);
-    setIsLoading(false);
-    if (error) {
-      const msg = error.includes('Invalid login') ? 'E-mail ou senha incorretos.' : error;
-      toast(msg, 'error');
-      return;
+    try {
+      const { error } = await signIn(form.email, form.password);
+      if (error) {
+        const msg = error.includes('Invalid login') ? 'E-mail ou senha incorretos.' : error;
+        toast(msg, 'error');
+        return;
+      }
+      toast('Bem-vindo!', 'success');
+      router.push('/');
+    } catch {
+      toast('Erro inesperado. Tente novamente.', 'error');
+    } finally {
+      setIsLoading(false);
     }
-    toast('Bem-vindo!', 'success');
-    router.push('/');
   };
 
   const handleRegister = async () => {
@@ -47,14 +52,19 @@ export default function LoginPage() {
     if (form.password !== form.confirmPw) { toast('Senhas não coincidem.', 'error'); return; }
     if (form.password.length < 6) { toast('A senha deve ter ao menos 6 caracteres.', 'error'); return; }
     setIsLoading(true);
-    const { error } = await signUp(form.name, form.email, form.password);
-    setIsLoading(false);
-    if (error) {
-      const msg = error.includes('already registered') ? 'E-mail já cadastrado.' : error;
-      toast(msg, 'error');
-      return;
+    try {
+      const { error } = await signUp(form.name, form.email, form.password);
+      if (error) {
+        const msg = error.includes('already registered') ? 'E-mail já cadastrado.' : error;
+        toast(msg, 'error');
+        return;
+      }
+      toast('Conta criada! Verifique seu e-mail para confirmar o acesso.', 'success');
+    } catch {
+      toast('Erro inesperado. Tente novamente.', 'error');
+    } finally {
+      setIsLoading(false);
     }
-    toast('Conta criada! Verifique seu e-mail para confirmar o acesso.', 'success');
   };
 
   return (
