@@ -20,6 +20,7 @@ interface AuthCtxValue {
   logout: () => Promise<void>;
 }
 
+// Estado inicial neutro — idêntico no servidor e no cliente antes da hidratação.
 const AuthCtx = createContext<AuthCtxValue>({
   user: null,
   loading: true,
@@ -39,15 +40,8 @@ async function fetchProfile(authId: string, email: string): Promise<User | null>
 
     if (data) return data as User;
 
-    // Perfil não existe ainda (trigger pode ter atrasado) — cria fallback
-    const fallback = {
-      id: authId,
-      name: email.split('@')[0],
-      email,
-      role: 'SDR' as const,
-      active: true,
-      team_id: null,
-    };
+    // Trigger pode ter atrasado — cria fallback sem bloquear
+    const fallback = { id: authId, name: email.split('@')[0], email, role: 'SDR' as const, active: true, team_id: null };
     const { data: created } = await supabase
       .from('users')
       .insert(fallback)
@@ -63,15 +57,15 @@ async function fetchProfile(authId: string, email: string): Promise<User | null>
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  // Prevents double-initialization in React StrictMode and concurrent renders
+  // Garante que o listener seja criado uma única vez (React StrictMode monta effects duas vezes)
   const initialized = useRef(false);
 
   useEffect(() => {
     if (initialized.current) return;
     initialized.current = true;
 
-    // onAuthStateChange fires INITIAL_SESSION on mount — no need for a separate getSession() call.
-    // Having both causes concurrent lock contention on the Supabase auth token.
+    // onAuthStateChange dispara INITIAL_SESSION na montagem com a sessão atual.
+    // NÃO chamamos getSession() separadamente — isso causaria concorrência no lock do auth token.
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, session) => {
         if (session?.user) {
@@ -107,6 +101,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     window.location.replace('/login');
   }, []);
 
+  // Renderiza children incondicionalmente — jamais bloqueia o render por estado de auth.
+  // Cada página filha decide individualmente o que exibir enquanto loading=true.
   return (
     <AuthCtx.Provider value={{ user, loading, signIn, signUp, signOut, logout: signOut }}>
       {children}
