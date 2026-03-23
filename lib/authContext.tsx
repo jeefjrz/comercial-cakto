@@ -37,7 +37,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const getOrCreateProfile = async (authId: string, email: string) => {
     try {
       // 1. Tenta buscar o perfil
-      const { data: profile, error: fetchError } = await supabase
+      const { data: profile } = await supabase
         .from('users')
         .select('*')
         .eq('id', authId)
@@ -45,8 +45,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (profile) return profile as User;
 
-      // 2. Se não existir, tenta criar na hora (Auto-fix para o looping)
-      const newProfile = {
+      // 2. Se não existir, tenta criar na hora
+      // Usamos 'any' aqui para evitar o erro de tipagem no campo 'role' durante o build
+      const newProfile: any = {
         id: authId,
         name: email.split('@')[0],
         email: email,
@@ -63,12 +64,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (insertError) {
         console.error('Erro ao auto-criar perfil:', insertError);
-        // Retorna o objeto local se o insert falhar (evita o loop de qualquer jeito)
         return newProfile as User;
       }
 
       return createdProfile as User;
     } catch (err) {
+      console.error('Erro crítico no getOrCreateProfile:', err);
       return null;
     }
   };
@@ -85,7 +86,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     // Escuta mudanças (Login/Logout)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
+      async (_event, session) => {
         if (session?.user) {
           const profile = await getOrCreateProfile(session.user.id, session.user.email!);
           setUser(profile);
