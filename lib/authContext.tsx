@@ -36,23 +36,9 @@ async function fetchProfile(authId: string, email: string): Promise<User | null>
       .select('id,name,email,role,team_id,active')
       .eq('id', authId)
       .maybeSingle();
-
     if (data) return data as User;
-
-    const fallback = {
-      id: authId,
-      name: email.split('@')[0],
-      email,
-      role: 'SDR' as const,
-      active: true,
-      team_id: null,
-    };
-    const { data: created } = await supabase
-      .from('users')
-      .insert(fallback)
-      .select('id,name,email,role,team_id,active')
-      .single();
-
+    const fallback = { id: authId, name: email.split('@')[0], email, role: 'SDR' as const, active: true, team_id: null };
+    const { data: created } = await supabase.from('users').insert(fallback).select('id,name,email,role,team_id,active').single();
     return (created ?? fallback) as User;
   } catch {
     return null;
@@ -64,36 +50,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const initialized = useRef(false);
 
-  useEffect(() => {
-    if (initialized.current) return;
-    initialized.current = true;
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
-        if (session?.user) {
-          const profile = await fetchProfile(session.user.id, session.user.email!);
-          setUser(profile);
-        } else {
-          setUser(null);
-        }
-        setLoading(false);
-      }
-    );
-
-    return () => subscription.unsubscribe();
-  }, []);
-
   const signIn = useCallback(async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     return { error: error?.message ?? null };
   }, []);
 
   const signUp = useCallback(async (name: string, email: string, password: string) => {
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: { data: { full_name: name } },
-    });
+    const { error } = await supabase.auth.signUp({ email, password, options: { data: { full_name: name } } });
     return { error: error?.message ?? null };
   }, []);
 
@@ -101,6 +64,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await supabase.auth.signOut();
     setUser(null);
     window.location.replace('/login');
+  }, []);
+
+  useEffect(() => {
+    if (initialized.current) return;
+    initialized.current = true;
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (session?.user) {
+        const profile = await fetchProfile(session.user.id, session.user.email!);
+        setUser(profile);
+      } else {
+        setUser(null);
+      }
+      setLoading(false);
+    });
+    return () => subscription.unsubscribe();
   }, []);
 
   return (
