@@ -17,7 +17,6 @@ interface AuthCtxValue {
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signUp: (name: string, email: string, password: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
-  /** @deprecated use signOut */
   logout: () => Promise<void>;
 }
 
@@ -30,58 +29,65 @@ const AuthCtx = createContext<AuthCtxValue>({
   logout: async () => { },
 });
 
-async function fetchProfile(authId: string, authEmail?: string): Promise<User | null> {
-  try {
-    const { data, error } = await supabase
-      .from('users')
-      .select('*')
-      .eq('id', authId)
-      .maybeSingle();
-
-    if (error) {
-      console.error('Erro ao buscar perfil:', error);
-      return null;
-    }
-
-    // PLANO B: Se o perfil não existe na tabela 'users', criamos um objeto temporário
-    // para o React não quebrar (Erro #418) e o usuário conseguir entrar.
-    if (!data) {
-      console.warn('Perfil não encontrado. Usando perfil temporário.');
-      return {
-        id: authId,
-        name: authEmail ? authEmail.split('@')[0] : 'Usuário',
-        email: authEmail || '',
-        role: 'SDR', // Padrão
-        team_id: null,
-        active: true
-      };
-    }
-
-    return data as User;
-  } catch (err) {
-    return null;
-  }
-}
-
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Função para garantir que o perfil exista na tabela 'users'
+  const getOrCreateProfile = async (authId: string, email: string) => {
+    try {
+      // 1. Tenta buscar o perfil
+      const { data: profile, error: fetchError } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', authId)
+        .maybeSingle();
+
+      if (profile) return profile as User;
+
+      // 2. Se não existir, tenta criar na hora (Auto-fix para o looping)
+      const newProfile = {
+        id: authId,
+        name: email.split('@')[0],
+        email: email,
+        role: 'SDR',
+        active: true,
+        team_id: null
+      };
+
+      const { data: createdProfile, error: insertError } = await supabase
+        .from('users')
+        .insert(newProfile)
+        .select()
+        .single();
+
+      if (insertError) {
+        console.error('Erro ao auto-criar perfil:', insertError);
+        // Retorna o objeto local se o insert falhar (evita o loop de qualquer jeito)
+        return newProfile as User;
+      }
+
+      return createdProfile as User;
+    } catch (err) {
+      return null;
+    }
+  };
+
   useEffect(() => {
-    // 1. Checa sessão ao carregar
+    // Checa sessão inicial
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session?.user) {
-        const profile = await fetchProfile(session.user.id, session.user.email);
+        const profile = await getOrCreateProfile(session.user.id, session.user.email!);
         setUser(profile);
       }
       setLoading(false);
     });
 
-    // 2. Escuta mudanças de login/logout
+    // Escuta mudanças (Login/Logout)
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
+      async (event, session) => {
         if (session?.user) {
-          const profile = await fetchProfile(session.user.id, session.user.email);
+          const profile = await getOrCreateProfile(session.user.id, session.user.email!);
           setUser(profile);
         } else {
           setUser(null);
