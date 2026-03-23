@@ -1,3 +1,6 @@
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -14,22 +17,21 @@ export default function LoginPage() {
   const toast = useToast();
   const router = useRouter();
 
-  // 1. Declarar todos os estados primeiro
+  // 1. Estados
   const [mounted, setMounted] = useState(false);
   const [tab, setTab] = useState<'Entrar' | 'Cadastrar'>('Entrar');
   const [showPw, setShowPw] = useState(false);
   const [form, setForm] = useState({ name: '', email: '', password: '', confirmPw: '' });
   const [isLoading, setIsLoading] = useState(false);
 
-  // 2. Garantir que o HTML montou no navegador ANTES de fazer qualquer coisa (Mata o erro #418)
+  // 2. Escudo de Hidratação
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  // 3. O useEffect do redirecionamento blindado
+  // 3. Redirecionamento forçado para quebrar cache
   useEffect(() => {
     if (mounted && !loading && user) {
-      // Usamos window.location.replace para forçar um reload limpo e quebrar o loop
       window.location.replace('/');
     }
   }, [mounted, loading, user]);
@@ -49,7 +51,7 @@ export default function LoginPage() {
         return;
       }
       toast('Bem-vindo!', 'success');
-      // Redirecionamento forçado e absoluto ao logar com sucesso
+      // Replace absoluto para garantir entrada limpa no Dashboard
       window.location.replace('/');
     } catch {
       toast('Erro inesperado. Tente novamente.', 'error');
@@ -72,7 +74,7 @@ export default function LoginPage() {
         return;
       }
       toast('Conta criada com sucesso! Faça o login.', 'success');
-      setTab('Entrar'); // Joga o usuário pra aba de login após criar a conta
+      setTab('Entrar');
     } catch {
       toast('Erro inesperado. Tente novamente.', 'error');
     } finally {
@@ -80,7 +82,6 @@ export default function LoginPage() {
     }
   };
 
-  // Previne renderização quebra-cabeça enquanto a tela não está pronta
   if (!mounted) return null;
 
   return (
@@ -88,7 +89,6 @@ export default function LoginPage() {
       minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
       background: 'var(--bg)', padding: 24
     }}>
-      {/* Background blobs */}
       <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}>
         <div style={{
           position: 'absolute', top: '-20%', left: '-10%', width: 600, height: 600, borderRadius: '50%',
@@ -105,7 +105,6 @@ export default function LoginPage() {
         backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
         background: 'var(--bg-card)', border: '1px solid var(--border)'
       }}>
-        {/* Logo */}
         <div style={{ padding: '32px 32px 0', textAlign: 'center' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 8 }}>
             <div style={{
@@ -124,7 +123,6 @@ export default function LoginPage() {
           </p>
         </div>
 
-        {/* Tabs */}
         <div style={{ padding: '0 32px' }}>
           <PillTabs tabs={['Entrar', 'Cadastrar']} active={tab}
             onChange={t => setTab(t as 'Entrar' | 'Cadastrar')} />

@@ -1,3 +1,6 @@
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -30,16 +33,17 @@ export default function HomePage() {
   const [kpis, setKpis] = useState({ activeUsers: 0, todayActivations: 0, activeForms: 0, pendingPayments: 0 });
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
 
-  // 1. Escudo de Hidratação: Só executa após montar no navegador
+  // 1. Escudo de Hidratação
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  // 2. Lógica de Carregamento de Dados e Segurança
+  // 2. Lógica de Carregamento e Proteção contra Cache
   useEffect(() => {
     if (!mounted) return;
 
     if (!loading && !user) {
+      // Usar replace para forçar saída do loop de cache
       window.location.replace('/login');
       return;
     }
@@ -74,7 +78,6 @@ export default function HomePage() {
     fetchData();
   }, [user, loading, mounted]);
 
-  // 3. Renderização de Segurança (Mata o Erro #418)
   if (!mounted || loading || !user) {
     return (
       <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)' }}>
@@ -95,7 +98,6 @@ export default function HomePage() {
     <>
       <Header />
       <div className="page-wrap">
-        {/* Greeting */}
         <div style={{ marginBottom: 32 }}>
           <h1 style={{ fontSize: 32, fontWeight: 800, letterSpacing: '-.03em', color: 'var(--text)' }}>
             Bem-vindo, {firstName}.
@@ -105,7 +107,6 @@ export default function HomePage() {
           </p>
         </div>
 
-        {/* Modules grid */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16, marginBottom: 40 }}>
           {modules.map(m => (
             <button key={m.key} onClick={() => router.push(`/${m.key}`)} className="card-hover"
@@ -127,7 +128,6 @@ export default function HomePage() {
           ))}
         </div>
 
-        {/* Admin Panel */}
         {isAdmin && (
           <div className="fade-in">
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
@@ -142,7 +142,6 @@ export default function HomePage() {
               <KpiCard label="Pgtos Pendentes" value={kpis.pendingPayments} icon={CreditCard} color="var(--orange)" />
             </div>
 
-            {/* Audit Log */}
             <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, overflow: 'hidden' }}>
               <div style={{
                 padding: '16px 20px', borderBottom: '1px solid var(--border)',
