@@ -15,7 +15,7 @@ export default function LoginPage() {
   const router = useRouter();
 
   useEffect(() => {
-    if (user) router.push('/');
+    if (user) window.location.href = '/';
   }, [user, router]);
 
   const [tab, setTab] = useState<'Entrar' | 'Cadastrar'>('Entrar');
@@ -37,7 +37,7 @@ export default function LoginPage() {
         return;
       }
       toast('Bem-vindo!', 'success');
-      router.push('/');
+      window.location.href = '/';
     } catch {
       toast('Erro inesperado. Tente novamente.', 'error');
     } finally {
