@@ -75,20 +75,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signUp = useCallback(async (name: string, email: string, password: string) => {
-    const { data, error } = await supabase.auth.signUp({ email, password });
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { data: { full_name: name } },
+    });
     if (error) return { error: error.message };
-
-    if (data.user) {
-      const { error: profileError } = await supabase.from('users').insert({
-        id: data.user.id,
-        name,
-        email,
-        role: 'SDR',
-        active: true,
-      });
-      if (profileError) return { error: profileError.message };
-    }
-
     return { error: null };
   }, []);
 

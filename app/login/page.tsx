@@ -37,6 +37,7 @@ export default function LoginPage() {
       return;
     }
     toast('Bem-vindo!', 'success');
+    router.push('/');
   };
 
   const handleRegister = async () => {
