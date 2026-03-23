@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Users, Zap, FileText, CreditCard, LayoutDashboard, Trophy, Package, Calendar, Download } from 'lucide-react';
+import { Users, Zap, FileText, CreditCard, LayoutDashboard, Trophy, Package, Calendar, Download, Loader2 } from 'lucide-react';
 import { useAuth } from '@/lib/authContext';
 import { Header } from '@/components/Header';
 import { KpiCard } from '@/components/ui/KpiCard';
@@ -13,43 +13,78 @@ import { supabase } from '@/lib/supabase/client';
 type AuditLog = { id: string; user_name: string; action: string; module: string; created_at: string }
 
 const MODULES = [
-  { key: 'responsaveis', label: 'Responsáveis', Icon: Users,           color: 'var(--action)', desc: 'Gerencie colaboradores e times' },
-  { key: 'ativacoes',    label: 'Ativações',     Icon: Zap,             color: 'var(--purple)', desc: 'Controle de clientes ativados' },
-  { key: 'ranking',      label: 'Ranking',        Icon: Trophy,          color: 'var(--gold)',   desc: 'Performance e classificação' },
-  { key: 'formularios',  label: 'Formulários',    Icon: FileText,        color: 'var(--green)',  desc: 'Formulários e respostas' },
-  { key: 'estoque',      label: 'Estoque',         Icon: Package,         color: 'var(--orange)', desc: 'Itens internos e premiações' },
-  { key: 'agenda',       label: 'Agenda',          Icon: Calendar,        color: 'var(--cyan)',   desc: 'Calls e agenda comercial' },
-  { key: 'dashboards',   label: 'Dashboards',      Icon: LayoutDashboard, color: 'var(--pink)',   desc: 'KPIs e visualizações' },
+  { key: 'responsaveis', label: 'Responsáveis', Icon: Users, color: 'var(--action)', desc: 'Gerencie colaboradores e times' },
+  { key: 'ativacoes', label: 'Ativações', Icon: Zap, color: 'var(--purple)', desc: 'Controle de clientes ativados' },
+  { key: 'ranking', label: 'Ranking', Icon: Trophy, color: 'var(--gold)', desc: 'Performance e classificação' },
+  { key: 'formularios', label: 'Formulários', Icon: FileText, color: 'var(--green)', desc: 'Formulários e respostas' },
+  { key: 'estoque', label: 'Estoque', Icon: Package, color: 'var(--orange)', desc: 'Itens internos e premiações' },
+  { key: 'agenda', label: 'Agenda', Icon: Calendar, color: 'var(--cyan)', desc: 'Calls e agenda comercial' },
+  { key: 'dashboards', label: 'Dashboards', Icon: LayoutDashboard, color: 'var(--pink)', desc: 'KPIs e visualizações' },
 ];
 
 export default function HomePage() {
   const { user, loading } = useAuth();
   const router = useRouter();
 
+  const [mounted, setMounted] = useState(false);
   const [kpis, setKpis] = useState({ activeUsers: 0, todayActivations: 0, activeForms: 0, pendingPayments: 0 });
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
 
+  // 1. Escudo de Hidratação: Só executa após montar no navegador
   useEffect(() => {
-    if (!loading && !user) { router.push('/login'); return; }
+    setMounted(true);
+  }, []);
+
+  // 2. Lógica de Carregamento de Dados e Segurança
+  useEffect(() => {
+    if (!mounted) return;
+
+    if (!loading && !user) {
+      window.location.replace('/login');
+      return;
+    }
+
     if (!user || user.role !== 'Admin') return;
 
     const todayStr = new Date().toISOString().split('T')[0];
-    Promise.all([
-      supabase.from('users').select('id', { count: 'exact', head: true }).eq('active', true),
-      supabase.from('activations').select('id', { count: 'exact', head: true }).eq('date', todayStr),
-      supabase.from('forms').select('id', { count: 'exact', head: true }).eq('active', true),
-      supabase.from('payments').select('id', { count: 'exact', head: true }).eq('status', 'Pendente'),
-      supabase.from('audit_logs').select('id,user_name,action,module,created_at').order('created_at', { ascending: false }).limit(10),
-    ]).then(([{ count: au }, { count: ta }, { count: af }, { count: pp }, { data: logs }]) => {
-      setKpis({ activeUsers: au || 0, todayActivations: ta || 0, activeForms: af || 0, pendingPayments: pp || 0 });
-      if (logs) setAuditLogs(logs as AuditLog[]);
-    });
-  }, [user, loading, router]);
 
-  if (loading || !user) return null;
+    const fetchData = async () => {
+      try {
+        const [au, ta, af, pp, logs] = await Promise.all([
+          supabase.from('users').select('id', { count: 'exact', head: true }).eq('active', true),
+          supabase.from('activations').select('id', { count: 'exact', head: true }).eq('date', todayStr),
+          supabase.from('forms').select('id', { count: 'exact', head: true }).eq('active', true),
+          supabase.from('payments').select('id', { count: 'exact', head: true }).eq('status', 'Pendente'),
+          supabase.from('audit_logs').select('id,user_name,action,module,created_at').order('created_at', { ascending: false }).limit(10),
+        ]);
 
-  const isAdmin  = user.role === 'Admin';
-  const firstName = user.name.split(' ')[0];
+        setKpis({
+          activeUsers: au.count || 0,
+          todayActivations: ta.count || 0,
+          activeForms: af.count || 0,
+          pendingPayments: pp.count || 0
+        });
+
+        if (logs.data) setAuditLogs(logs.data as AuditLog[]);
+      } catch (err) {
+        console.error('Erro ao carregar KPIs:', err);
+      }
+    };
+
+    fetchData();
+  }, [user, loading, mounted]);
+
+  // 3. Renderização de Segurança (Mata o Erro #418)
+  if (!mounted || loading || !user) {
+    return (
+      <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)' }}>
+        <Loader2 className="animate-spin" size={32} color="var(--action)" />
+      </div>
+    );
+  }
+
+  const isAdmin = user.role === 'Admin';
+  const firstName = user.name ? user.name.split(' ')[0] : 'Usuário';
 
   const modules = [
     ...MODULES,
@@ -74,10 +109,14 @@ export default function HomePage() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16, marginBottom: 40 }}>
           {modules.map(m => (
             <button key={m.key} onClick={() => router.push(`/${m.key}`)} className="card-hover"
-              style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 16, padding: 24,
-                textAlign: 'left', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 12, fontFamily: 'inherit' }}>
-              <div style={{ width: 44, height: 44, borderRadius: 12, background: `color-mix(in srgb, ${m.color} 14%, transparent)`,
-                display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              style={{
+                background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 16, padding: 24,
+                textAlign: 'left', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 12, fontFamily: 'inherit'
+              }}>
+              <div style={{
+                width: 44, height: 44, borderRadius: 12, background: `color-mix(in srgb, ${m.color} 14%, transparent)`,
+                display: 'flex', alignItems: 'center', justifyContent: 'center'
+              }}>
                 <m.Icon size={22} color={m.color} />
               </div>
               <div>
@@ -90,30 +129,29 @@ export default function HomePage() {
 
         {/* Admin Panel */}
         {isAdmin && (
-          <div>
+          <div className="fade-in">
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
               <h2 style={{ fontSize: 20, fontWeight: 700 }}>Painel Admin</h2>
               <Badge label="ACESSO RESTRITO" color="var(--pink)" />
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12, marginBottom: 24 }}>
-              <KpiCard label="Usuários Ativos"   value={kpis.activeUsers}       icon={Users}       color="var(--action)" />
-              <KpiCard label="Ativações Hoje"    value={kpis.todayActivations}  icon={Zap}         color="var(--purple)" />
-              <KpiCard label="Formulários"       value={kpis.activeForms}       icon={FileText}    color="var(--green)"  />
-              <KpiCard label="Pgtos Pendentes"   value={kpis.pendingPayments}   icon={CreditCard}  color="var(--orange)" />
+              <KpiCard label="Usuários Ativos" value={kpis.activeUsers} icon={Users} color="var(--action)" />
+              <KpiCard label="Ativações Hoje" value={kpis.todayActivations} icon={Zap} color="var(--purple)" />
+              <KpiCard label="Formulários" value={kpis.activeForms} icon={FileText} color="var(--green)" />
+              <KpiCard label="Pgtos Pendentes" value={kpis.pendingPayments} icon={CreditCard} color="var(--orange)" />
             </div>
 
             {/* Audit Log */}
             <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, overflow: 'hidden' }}>
-              <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)',
-                display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{
+                padding: '16px 20px', borderBottom: '1px solid var(--border)',
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+              }}>
                 <span style={{ fontWeight: 700, fontSize: 15 }}>Log de Auditoria</span>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <Button size="sm" variant="secondary" icon={CreditCard} onClick={() => router.push('/pagamentos')}>
+                  <Button size="sm" variant="secondary" onClick={() => router.push('/pagamentos')}>
                     Ver Pagamentos
-                  </Button>
-                  <Button size="sm" variant="secondary" icon={Download} onClick={() => {}}>
-                    Exportar Dados
                   </Button>
                 </div>
               </div>
