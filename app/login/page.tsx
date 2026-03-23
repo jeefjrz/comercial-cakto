@@ -14,14 +14,25 @@ export default function LoginPage() {
   const toast = useToast();
   const router = useRouter();
 
-  useEffect(() => {
-    if (!loading && user) router.replace('/');
-  }, [user, loading, router]);
-
+  // 1. Declarar todos os estados primeiro
+  const [mounted, setMounted] = useState(false);
   const [tab, setTab] = useState<'Entrar' | 'Cadastrar'>('Entrar');
   const [showPw, setShowPw] = useState(false);
   const [form, setForm] = useState({ name: '', email: '', password: '', confirmPw: '' });
   const [isLoading, setIsLoading] = useState(false);
+
+  // 2. Garantir que o HTML montou no navegador ANTES de fazer qualquer coisa (Mata o erro #418)
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // 3. O useEffect do redirecionamento blindado
+  useEffect(() => {
+    if (mounted && !loading && user) {
+      // Usamos window.location.replace para forçar um reload limpo e quebrar o loop
+      window.location.replace('/');
+    }
+  }, [mounted, loading, user]);
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm(p => ({ ...p, [k]: k === 'email' ? e.target.value.toLowerCase() : e.target.value }));
@@ -34,13 +45,14 @@ export default function LoginPage() {
       if (error) {
         const msg = error.includes('Invalid login') ? 'E-mail ou senha incorretos.' : error;
         toast(msg, 'error');
+        setIsLoading(false);
         return;
       }
       toast('Bem-vindo!', 'success');
-      router.replace('/');
+      // Redirecionamento forçado e absoluto ao logar com sucesso
+      window.location.replace('/');
     } catch {
       toast('Erro inesperado. Tente novamente.', 'error');
-    } finally {
       setIsLoading(false);
     }
   };
@@ -59,7 +71,8 @@ export default function LoginPage() {
         toast(msg, 'error');
         return;
       }
-      toast('Conta criada! Verifique seu e-mail para confirmar o acesso.', 'success');
+      toast('Conta criada com sucesso! Faça o login.', 'success');
+      setTab('Entrar'); // Joga o usuário pra aba de login após criar a conta
     } catch {
       toast('Erro inesperado. Tente novamente.', 'error');
     } finally {
@@ -67,26 +80,39 @@ export default function LoginPage() {
     }
   };
 
+  // Previne renderização quebra-cabeça enquanto a tela não está pronta
+  if (!mounted) return null;
+
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: 'var(--bg)', padding: 24 }}>
+    <div style={{
+      minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: 'var(--bg)', padding: 24
+    }}>
       {/* Background blobs */}
       <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}>
-        <div style={{ position: 'absolute', top: '-20%', left: '-10%', width: 600, height: 600, borderRadius: '50%',
-          background: 'radial-gradient(circle, rgba(41,151,255,.08) 0%, transparent 70%)' }} />
-        <div style={{ position: 'absolute', bottom: '-10%', right: '-10%', width: 500, height: 500, borderRadius: '50%',
-          background: 'radial-gradient(circle, rgba(191,90,242,.07) 0%, transparent 70%)' }} />
+        <div style={{
+          position: 'absolute', top: '-20%', left: '-10%', width: 600, height: 600, borderRadius: '50%',
+          background: 'radial-gradient(circle, rgba(41,151,255,.08) 0%, transparent 70%)'
+        }} />
+        <div style={{
+          position: 'absolute', bottom: '-10%', right: '-10%', width: 500, height: 500, borderRadius: '50%',
+          background: 'radial-gradient(circle, rgba(191,90,242,.07) 0%, transparent 70%)'
+        }} />
       </div>
 
-      <div className="modal-box scale-in" style={{ width: '100%', maxWidth: 420,
+      <div className="modal-box scale-in" style={{
+        width: '100%', maxWidth: 420,
         backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
-        background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+        background: 'var(--bg-card)', border: '1px solid var(--border)'
+      }}>
         {/* Logo */}
         <div style={{ padding: '32px 32px 0', textAlign: 'center' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 8 }}>
-            <div style={{ width: 36, height: 36, borderRadius: 10,
+            <div style={{
+              width: 36, height: 36, borderRadius: 10,
               background: 'linear-gradient(135deg,#2997FF,#BF5AF2)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              display: 'flex', alignItems: 'center', justifyContent: 'center'
+            }}>
               <Zap size={20} color="#fff" />
             </div>
             <span className="logo-text" style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-.03em' }}>
@@ -131,8 +157,10 @@ export default function LoginPage() {
                 <Lock size={16} color="var(--text2)" />
               </div>
               <button type="button" onClick={() => setShowPw(p => !p)}
-                style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
-                  background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text2)', display: 'flex' }}>
+                style={{
+                  position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
+                  background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text2)', display: 'flex'
+                }}>
                 {showPw ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>
             </div>
@@ -146,8 +174,10 @@ export default function LoginPage() {
 
           {tab === 'Entrar' && (
             <div style={{ textAlign: 'right' }}>
-              <button style={{ background: 'none', border: 'none', color: 'var(--action)', fontSize: 13,
-                fontWeight: 600, cursor: 'pointer' }}
+              <button style={{
+                background: 'none', border: 'none', color: 'var(--action)', fontSize: 13,
+                fontWeight: 600, cursor: 'pointer'
+              }}
                 onClick={() => toast('Verifique seu email para redefinir a senha.', 'info')}>
                 Esqueci a senha
               </button>
@@ -158,8 +188,10 @@ export default function LoginPage() {
             onClick={tab === 'Entrar' ? handleLogin : handleRegister}
             disabled={isLoading}
             size="lg"
-            style={{ width: '100%', justifyContent: 'center', marginTop: 4,
-              opacity: isLoading ? 0.6 : 1 }}
+            style={{
+              width: '100%', justifyContent: 'center', marginTop: 4,
+              opacity: isLoading ? 0.6 : 1
+            }}
           >
             {isLoading
               ? (tab === 'Entrar' ? 'Entrando…' : 'Criando conta…')
