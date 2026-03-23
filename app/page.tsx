@@ -1,7 +1,8 @@
+'use client';
+
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Users, Zap, FileText, CreditCard, LayoutDashboard, Trophy, Package, Calendar, Download, Loader2 } from 'lucide-react';
@@ -33,17 +34,14 @@ export default function HomePage() {
   const [kpis, setKpis] = useState({ activeUsers: 0, todayActivations: 0, activeForms: 0, pendingPayments: 0 });
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
 
-  // 1. Escudo de Hidratação
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  // 2. Lógica de Carregamento e Proteção contra Cache
   useEffect(() => {
     if (!mounted) return;
 
     if (!loading && !user) {
-      // Usar replace para forçar saída do loop de cache
       window.location.replace('/login');
       return;
     }

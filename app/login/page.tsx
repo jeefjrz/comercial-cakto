@@ -1,7 +1,8 @@
+'use client';
+
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Zap, Mail, Lock, Eye, EyeOff } from 'lucide-react';
@@ -17,19 +18,16 @@ export default function LoginPage() {
   const toast = useToast();
   const router = useRouter();
 
-  // 1. Estados
   const [mounted, setMounted] = useState(false);
   const [tab, setTab] = useState<'Entrar' | 'Cadastrar'>('Entrar');
   const [showPw, setShowPw] = useState(false);
   const [form, setForm] = useState({ name: '', email: '', password: '', confirmPw: '' });
   const [isLoading, setIsLoading] = useState(false);
 
-  // 2. Escudo de Hidratação
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  // 3. Redirecionamento forçado para quebrar cache
   useEffect(() => {
     if (mounted && !loading && user) {
       window.location.replace('/');
@@ -51,7 +49,6 @@ export default function LoginPage() {
         return;
       }
       toast('Bem-vindo!', 'success');
-      // Replace absoluto para garantir entrada limpa no Dashboard
       window.location.replace('/');
     } catch {
       toast('Erro inesperado. Tente novamente.', 'error');
@@ -176,7 +173,7 @@ export default function LoginPage() {
                 background: 'none', border: 'none', color: 'var(--action)', fontSize: 13,
                 fontWeight: 600, cursor: 'pointer'
               }}
-                onClick={() => toast('Verifique seu email para redefinir a senha.', 'info')}>
+                onClick={() => toast('Verifique seu e-mail para redefinir a senha.', 'info')}>
                 Esqueci a senha
               </button>
             </div>
