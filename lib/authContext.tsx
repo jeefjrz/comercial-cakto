@@ -26,18 +26,28 @@ const AuthCtx = createContext<AuthCtxValue>({
   loading: true,
   signIn: async () => ({ error: null }),
   signUp: async () => ({ error: null }),
-  signOut: async () => {},
-  logout: async () => {},
+  signOut: async () => { },
+  logout: async () => { },
 });
 
+// FUNÇÃO AJUSTADA: Usando '*' para evitar erro 406 (Not Acceptable)
 async function fetchProfile(authId: string): Promise<User | null> {
-  const { data, error } = await supabase
-    .from('users')
-    .select('id, name, email, role, team_id, active')
-    .eq('id', authId)
-    .single();
-  if (error || !data) return null;
-  return data as User;
+  try {
+    const { data, error } = await supabase
+      .from('users')
+      .select('*') // Busca todas as colunas disponíveis para não dar conflito
+      .eq('id', authId)
+      .maybeSingle(); // maybeSingle é mais seguro que .single() para evitar erros de 'não encontrado'
+
+    if (error || !data) {
+      console.warn('Perfil não encontrado no banco, mas usuário está autenticado.');
+      return null;
+    }
+    return data as User;
+  } catch (err) {
+    console.error('Erro crítico ao buscar perfil:', err);
+    return null;
+  }
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -62,6 +72,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         } else {
           setUser(null);
         }
+        setLoading(false);
       }
     );
 
