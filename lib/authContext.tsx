@@ -30,22 +30,35 @@ const AuthCtx = createContext<AuthCtxValue>({
   logout: async () => { },
 });
 
-// FUNÇÃO AJUSTADA: Usando '*' para evitar erro 406 (Not Acceptable)
-async function fetchProfile(authId: string): Promise<User | null> {
+async function fetchProfile(authId: string, authEmail?: string): Promise<User | null> {
   try {
     const { data, error } = await supabase
       .from('users')
-      .select('*') // Busca todas as colunas disponíveis para não dar conflito
+      .select('*')
       .eq('id', authId)
-      .maybeSingle(); // maybeSingle é mais seguro que .single() para evitar erros de 'não encontrado'
+      .maybeSingle();
 
-    if (error || !data) {
-      console.warn('Perfil não encontrado no banco, mas usuário está autenticado.');
+    if (error) {
+      console.error('Erro ao buscar perfil:', error);
       return null;
     }
+
+    // PLANO B: Se o perfil não existe na tabela 'users', criamos um objeto temporário
+    // para o React não quebrar (Erro #418) e o usuário conseguir entrar.
+    if (!data) {
+      console.warn('Perfil não encontrado. Usando perfil temporário.');
+      return {
+        id: authId,
+        name: authEmail ? authEmail.split('@')[0] : 'Usuário',
+        email: authEmail || '',
+        role: 'SDR', // Padrão
+        team_id: null,
+        active: true
+      };
+    }
+
     return data as User;
   } catch (err) {
-    console.error('Erro crítico ao buscar perfil:', err);
     return null;
   }
 }
@@ -55,19 +68,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Hydrate session on mount
+    // 1. Checa sessão ao carregar
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session?.user) {
-        const profile = await fetchProfile(session.user.id);
+        const profile = await fetchProfile(session.user.id, session.user.email);
         setUser(profile);
       }
       setLoading(false);
     });
 
+    // 2. Escuta mudanças de login/logout
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, session) => {
         if (session?.user) {
-          const profile = await fetchProfile(session.user.id);
+          const profile = await fetchProfile(session.user.id, session.user.email);
           setUser(profile);
         } else {
           setUser(null);
@@ -98,6 +112,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signOut = useCallback(async () => {
     await supabase.auth.signOut();
     setUser(null);
+    window.location.replace('/login');
   }, []);
 
   return (
