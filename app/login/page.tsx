@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Zap, Mail, Lock, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '@/lib/authContext';
@@ -10,9 +10,13 @@ import { Button } from '@/components/ui/Button';
 import { capitalize } from '@/lib/utils';
 
 export default function LoginPage() {
-  const { signIn, signUp } = useAuth();
+  const { user, signIn, signUp } = useAuth();
   const toast = useToast();
   const router = useRouter();
+
+  useEffect(() => {
+    if (user) router.push('/');
+  }, [user, router]);
 
   const [tab, setTab] = useState<'Entrar' | 'Cadastrar'>('Entrar');
   const [showPw, setShowPw] = useState(false);
@@ -33,7 +37,6 @@ export default function LoginPage() {
       return;
     }
     toast('Bem-vindo!', 'success');
-    setTimeout(() => router.push('/'), 400);
   };
 
   const handleRegister = async () => {
