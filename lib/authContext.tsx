@@ -1,6 +1,8 @@
 'use client';
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { supabase } from './supabase/client';
+// supabase é um singleton criado no módulo (lib/supabase/client.ts) — uma única instância
+// compartilhada por toda a aplicação, evitando múltiplos GoTrue clients competindo pelo lock.
 
 export interface User {
   id: string;
@@ -20,7 +22,8 @@ interface AuthCtxValue {
   logout: () => Promise<void>;
 }
 
-// Estado inicial neutro — idêntico no servidor e no cliente antes da hidratação.
+// Valores default neutros — user: null, loading: true.
+// Idênticos no servidor e no cliente antes da hidratação → sem divergência de estado.
 const AuthCtx = createContext<AuthCtxValue>({
   user: null,
   loading: true,
@@ -40,8 +43,15 @@ async function fetchProfile(authId: string, email: string): Promise<User | null>
 
     if (data) return data as User;
 
-    // Trigger pode ter atrasado — cria fallback sem bloquear
-    const fallback = { id: authId, name: email.split('@')[0], email, role: 'SDR' as const, active: true, team_id: null };
+    // Trigger do banco pode ter atrasado — cria o perfil como fallback
+    const fallback = {
+      id: authId,
+      name: email.split('@')[0],
+      email,
+      role: 'SDR' as const,
+      active: true,
+      team_id: null,
+    };
     const { data: created } = await supabase
       .from('users')
       .insert(fallback)
@@ -55,17 +65,22 @@ async function fetchProfile(authId: string, email: string): Promise<User | null>
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  // Estado inicial null/true — mesmo valor no servidor e no cliente inicial.
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  // Garante que o listener seja criado uma única vez (React StrictMode monta effects duas vezes)
+
+  // useRef garante que o listener seja registrado uma única vez,
+  // mesmo no React StrictMode (que executa effects duas vezes em dev).
   const initialized = useRef(false);
 
   useEffect(() => {
     if (initialized.current) return;
     initialized.current = true;
 
-    // onAuthStateChange dispara INITIAL_SESSION na montagem com a sessão atual.
-    // NÃO chamamos getSession() separadamente — isso causaria concorrência no lock do auth token.
+    // onAuthStateChange dispara INITIAL_SESSION automaticamente na montagem,
+    // entregando a sessão atual sem precisar de getSession() separado.
+    // Chamar getSession() + onAuthStateChange ao mesmo tempo causaria
+    // concorrência no lock "sb-...-auth-token" → erro de lock roubado.
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, session) => {
         if (session?.user) {
@@ -101,8 +116,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     window.location.replace('/login');
   }, []);
 
-  // Renderiza children incondicionalmente — jamais bloqueia o render por estado de auth.
-  // Cada página filha decide individualmente o que exibir enquanto loading=true.
   return (
     <AuthCtx.Provider value={{ user, loading, signIn, signUp, signOut, logout: signOut }}>
       {children}

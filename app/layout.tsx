@@ -7,15 +7,14 @@ export const metadata: Metadata = {
   description: 'Sistema Comercial Interno',
 };
 
-// RootLayout é um Server Component puro — sem 'use client', sem estado, sem providers inline.
-// Todos os providers cliente ficam isolados em ClientProviders para não contaminar o SSR.
+// Server Component puro: sem 'use client', sem estado, sem lógica condicional no JSX.
+// suppressHydrationWarning em <html> e <body> silencia mismatches de atributos
+// injetados por extensões de browser (ex: dark-mode extensions, password managers).
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="pt-BR" suppressHydrationWarning>
       <body suppressHydrationWarning>
-        <ClientProviders>
-          {children}
-        </ClientProviders>
+        <ClientProviders>{children}</ClientProviders>
       </body>
     </html>
   );
