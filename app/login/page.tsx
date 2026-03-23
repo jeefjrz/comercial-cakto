@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Zap, Mail, Lock, Eye, EyeOff, Loader2 } from 'lucide-react';
+import { Zap, Mail, Lock, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '@/lib/authContext';
 import { useToast } from '@/components/ui/Toast';
 import { PillTabs } from '@/components/ui/PillTabs';
@@ -13,17 +13,23 @@ export default function LoginPage() {
   const { user, loading, signIn, signUp } = useAuth();
   const toast = useToast();
 
+  const [mounted, setMounted] = useState(false);
   const [tab, setTab] = useState<'Entrar' | 'Cadastrar'>('Entrar');
   const [showPw, setShowPw] = useState(false);
   const [form, setForm] = useState({ name: '', email: '', password: '', confirmPw: '' });
   const [isLoading, setIsLoading] = useState(false);
 
-  // Redirecionamento blindado e simples
+  // 1. O Escudo Anti-Erro 418: Avisa que o navegador assumiu o controle
   useEffect(() => {
-    if (!loading && user) {
+    setMounted(true);
+  }, []);
+
+  // 2. Só redireciona se tiver certeza que está logado e montado
+  useEffect(() => {
+    if (mounted && !loading && user) {
       window.location.replace('/');
     }
-  }, [loading, user]);
+  }, [mounted, loading, user]);
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm(p => ({ ...p, [k]: k === 'email' ? e.target.value.toLowerCase() : e.target.value }));
@@ -68,16 +74,11 @@ export default function LoginPage() {
     }
   };
 
-  // 1. SOLUÇÃO DO ERRO #418: Mostra um loader tanto no servidor quanto no cliente
-  if (loading) {
-    return (
-      <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)' }}>
-        <Loader2 className="animate-spin" size={32} color="var(--action)" />
-      </div>
-    );
-  }
+  // 3. A MÁGICA CONTRA O ERRO 418: Se não estiver montado no navegador, retorna null
+  // Isso impede que o Servidor e o Navegador briguem pelo HTML.
+  if (!mounted) return null;
 
-  // 2. Se já tem usuário e só está esperando redirecionar, não desenha o login novamente
+  // Se já estiver logado, não desenha a tela de login (evita piscar a tela)
   if (user) return null;
 
   return (
