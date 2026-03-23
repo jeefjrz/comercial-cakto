@@ -1,5 +1,5 @@
 'use client';
-import { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { supabase } from './supabase/client';
 
 export interface User {
@@ -25,70 +25,57 @@ const AuthCtx = createContext<AuthCtxValue>({
   loading: true,
   signIn: async () => ({ error: null }),
   signUp: async () => ({ error: null }),
-  signOut: async () => { },
-  logout: async () => { },
+  signOut: async () => {},
+  logout: async () => {},
 });
+
+async function fetchProfile(authId: string, email: string): Promise<User | null> {
+  try {
+    const { data } = await supabase
+      .from('users')
+      .select('id,name,email,role,team_id,active')
+      .eq('id', authId)
+      .maybeSingle();
+
+    if (data) return data as User;
+
+    // Perfil não existe ainda (trigger pode ter atrasado) — cria fallback
+    const fallback = {
+      id: authId,
+      name: email.split('@')[0],
+      email,
+      role: 'SDR' as const,
+      active: true,
+      team_id: null,
+    };
+    const { data: created } = await supabase
+      .from('users')
+      .insert(fallback)
+      .select('id,name,email,role,team_id,active')
+      .single();
+
+    return (created ?? fallback) as User;
+  } catch {
+    return null;
+  }
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-
-  // Função para garantir que o perfil exista na tabela 'users'
-  const getOrCreateProfile = async (authId: string, email: string) => {
-    try {
-      // 1. Tenta buscar o perfil
-      const { data: profile } = await supabase
-        .from('users')
-        .select('*')
-        .eq('id', authId)
-        .maybeSingle();
-
-      if (profile) return profile as User;
-
-      // 2. Se não existir, tenta criar na hora
-      // Usamos 'any' aqui para evitar o erro de tipagem no campo 'role' durante o build
-      const newProfile: any = {
-        id: authId,
-        name: email.split('@')[0],
-        email: email,
-        role: 'SDR',
-        active: true,
-        team_id: null
-      };
-
-      const { data: createdProfile, error: insertError } = await supabase
-        .from('users')
-        .insert(newProfile)
-        .select()
-        .single();
-
-      if (insertError) {
-        console.error('Erro ao auto-criar perfil:', insertError);
-        return newProfile as User;
-      }
-
-      return createdProfile as User;
-    } catch (err) {
-      console.error('Erro crítico no getOrCreateProfile:', err);
-      return null;
-    }
-  };
+  // Prevents double-initialization in React StrictMode and concurrent renders
+  const initialized = useRef(false);
 
   useEffect(() => {
-    // Checa sessão inicial
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (session?.user) {
-        const profile = await getOrCreateProfile(session.user.id, session.user.email!);
-        setUser(profile);
-      }
-      setLoading(false);
-    });
+    if (initialized.current) return;
+    initialized.current = true;
 
-    // Escuta mudanças (Login/Logout)
+    // onAuthStateChange fires INITIAL_SESSION on mount — no need for a separate getSession() call.
+    // Having both causes concurrent lock contention on the Supabase auth token.
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, session) => {
         if (session?.user) {
-          const profile = await getOrCreateProfile(session.user.id, session.user.email!);
+          const profile = await fetchProfile(session.user.id, session.user.email!);
           setUser(profile);
         } else {
           setUser(null);
@@ -102,8 +89,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signIn = useCallback(async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) return { error: error.message };
-    return { error: null };
+    return { error: error?.message ?? null };
   }, []);
 
   const signUp = useCallback(async (name: string, email: string, password: string) => {
@@ -112,8 +98,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       password,
       options: { data: { full_name: name } },
     });
-    if (error) return { error: error.message };
-    return { error: null };
+    return { error: error?.message ?? null };
   }, []);
 
   const signOut = useCallback(async () => {
