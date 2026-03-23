@@ -8,10 +8,16 @@ import { PillTabs } from '@/components/ui/PillTabs';
 import { Field } from '@/components/ui/Field';
 import { Button } from '@/components/ui/Button';
 
+// Skeleton idêntico ao que o servidor entrega — sem nenhuma lógica dinâmica.
+// Garante que SSR HTML === primeiro render do cliente → sem React #418.
+function HydrationSkeleton() {
+  return <div style={{ minHeight: '100vh', background: '#000' }} />;
+}
+
 export default function LoginPage() {
-  // isMounted ensures server HTML === initial client HTML (fixes React #418).
-  // Both server and client render the same neutral shell until useEffect fires.
-  const [isMounted, setIsMounted] = useState(false);
+  // isHydrated começa false no servidor E no primeiro render do cliente.
+  // Só vira true depois que o useEffect roda (pós-hidratação).
+  const [isHydrated, setIsHydrated] = useState(false);
 
   const { user, loading, signIn, signUp } = useAuth();
   const toast = useToast();
@@ -21,15 +27,19 @@ export default function LoginPage() {
   const [form, setForm] = useState({ name: '', email: '', password: '', confirmPw: '' });
   const [isLoading, setIsLoading] = useState(false);
 
-  // Step 1: mark as mounted after first paint
-  useEffect(() => { setIsMounted(true); }, []);
+  // Marca hidratação completa
+  useEffect(() => { setIsHydrated(true); }, []);
 
-  // Step 2: redirect only after fully mounted + auth resolved
+  // Redireciona apenas após hidratação + auth resolvido
   useEffect(() => {
-    if (!isMounted || loading) return;
+    if (!isHydrated || loading) return;
     if (user) window.location.replace('/');
-  }, [isMounted, loading, user]);
+  }, [isHydrated, loading, user]);
 
+  // Bloqueia qualquer render antes da hidratação completa
+  if (!isHydrated || loading) return <HydrationSkeleton />;
+
+  // A partir daqui: 100% cliente, hydration completa, sem sessão ativa
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm(p => ({ ...p, [k]: k === 'email' ? e.target.value.toLowerCase() : e.target.value }));
 
@@ -40,9 +50,8 @@ export default function LoginPage() {
       const { error } = await signIn(form.email, form.password);
       if (error) {
         toast(error.includes('Invalid login') ? 'E-mail ou senha incorretos.' : error, 'error');
-        return;
       }
-      // onAuthStateChange will fire → loading resolves → useEffect above redirects
+      // onAuthStateChange dispara → loading resolve → useEffect acima redireciona
     } catch {
       toast('Erro inesperado. Tente novamente.', 'error');
     } finally {
@@ -72,16 +81,8 @@ export default function LoginPage() {
     }
   };
 
-  // Neutral shell: rendered on server AND as client initial render.
-  // Must be structurally identical in both environments — no dynamic values.
-  if (!isMounted || loading) {
-    return <div style={{ minHeight: '100vh', background: 'var(--bg)' }} />;
-  }
-
-  // From here: pure client, fully hydrated, auth resolved, no user → show form
   return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)', padding: 24 }}>
-      {/* Background blobs */}
       <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}>
         <div style={{ position: 'absolute', top: '-20%', left: '-10%', width: 600, height: 600, borderRadius: '50%', background: 'radial-gradient(circle, rgba(41,151,255,.08) 0%, transparent 70%)' }} />
         <div style={{ position: 'absolute', bottom: '-10%', right: '-10%', width: 500, height: 500, borderRadius: '50%', background: 'radial-gradient(circle, rgba(191,90,242,.07) 0%, transparent 70%)' }} />
