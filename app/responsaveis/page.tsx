@@ -33,11 +33,11 @@ type DbTeam = {
 const ROLES: UserRole[] = ['Closer', 'SDR', 'Gerente de Contas', 'Supervisor', 'Head Comercial', 'Admin'];
 
 export default function ResponsaveisPage() {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
   const router = useRouter();
 
-  useEffect(() => { if (!user) router.push('/login'); }, [user, router]);
-  if (!user) return null;
+  useEffect(() => { if (!loading && !user) router.push('/login'); }, [user, loading, router]);
+  if (loading || !user) return null;
 
   return <ResponsaveisContent isAdmin={user.role === 'Admin'} />;
 }

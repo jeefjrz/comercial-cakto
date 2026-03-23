@@ -23,15 +23,15 @@ const MODULES = [
 ];
 
 export default function HomePage() {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
   const router = useRouter();
 
   const [kpis, setKpis] = useState({ activeUsers: 0, todayActivations: 0, activeForms: 0, pendingPayments: 0 });
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
 
   useEffect(() => {
-    if (!user) { router.push('/login'); return; }
-    if (user.role !== 'Admin') return;
+    if (!loading && !user) { router.push('/login'); return; }
+    if (!user || user.role !== 'Admin') return;
 
     const todayStr = new Date().toISOString().split('T')[0];
     Promise.all([
@@ -44,9 +44,9 @@ export default function HomePage() {
       setKpis({ activeUsers: au || 0, todayActivations: ta || 0, activeForms: af || 0, pendingPayments: pp || 0 });
       if (logs) setAuditLogs(logs as AuditLog[]);
     });
-  }, [user, router]);
+  }, [user, loading, router]);
 
-  if (!user) return null;
+  if (loading || !user) return null;
 
   const isAdmin  = user.role === 'Admin';
   const firstName = user.name.split(' ')[0];

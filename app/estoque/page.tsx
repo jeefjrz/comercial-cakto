@@ -27,10 +27,10 @@ const AWARD_STATUS_COLORS: Record<string, string> = {
 };
 
 export default function EstoquePage() {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
   const router = useRouter();
-  useEffect(() => { if (!user) router.push('/login'); }, [user, router]);
-  if (!user) return null;
+  useEffect(() => { if (!loading && !user) router.push('/login'); }, [user, loading, router]);
+  if (loading || !user) return null;
   return <EstoqueContent />;
 }
 

@@ -33,10 +33,10 @@ const MEDAL_COLORS = ['var(--gold)', '#C0C0C0', '#CD7F32'];
 const PODIUM_HEIGHTS = [160, 120, 100];
 
 export default function RankingPage() {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
   const router = useRouter();
-  useEffect(() => { if (!user) router.push('/login'); }, [user, router]);
-  if (!user) return null;
+  useEffect(() => { if (!loading && !user) router.push('/login'); }, [user, loading, router]);
+  if (loading || !user) return null;
   return <RankingContent />;
 }
 

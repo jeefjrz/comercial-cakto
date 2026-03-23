@@ -38,13 +38,14 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 export default function PagamentosPage() {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
   const router = useRouter();
   useEffect(() => {
+    if (loading) return;
     if (!user) { router.push('/login'); return; }
     if (user.role !== 'Admin' && user.role !== 'Head Comercial') router.push('/');
-  }, [user, router]);
-  if (!user || (user.role !== 'Admin' && user.role !== 'Head Comercial')) return null;
+  }, [user, loading, router]);
+  if (loading || !user || (user.role !== 'Admin' && user.role !== 'Head Comercial')) return null;
   return <PagamentosContent />;
 }
 

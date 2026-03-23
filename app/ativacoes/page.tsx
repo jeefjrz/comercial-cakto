@@ -35,10 +35,10 @@ const EMPTY_FORM = { client: '', email: '', channel: 'Inbound', responsible: '',
 const PER_PAGE = 5;
 
 export default function AtivacoesPage() {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
   const router = useRouter();
-  useEffect(() => { if (!user) router.push('/login'); }, [user, router]);
-  if (!user) return null;
+  useEffect(() => { if (!loading && !user) router.push('/login'); }, [user, loading, router]);
+  if (loading || !user) return null;
   return <AtivacoesContent isAdmin={user.role === 'Admin'} />;
 }
 
