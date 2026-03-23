@@ -13,23 +13,17 @@ export default function LoginPage() {
   const { user, loading, signIn, signUp } = useAuth();
   const toast = useToast();
 
-  const [mounted, setMounted] = useState(false);
   const [tab, setTab] = useState<'Entrar' | 'Cadastrar'>('Entrar');
   const [showPw, setShowPw] = useState(false);
   const [form, setForm] = useState({ name: '', email: '', password: '', confirmPw: '' });
   const [isLoading, setIsLoading] = useState(false);
 
-  // 1. O Escudo Anti-Erro 418: Avisa que o navegador assumiu o controle
+  // Redireciona de forma limpa se já estiver logado
   useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  // 2. Só redireciona se tiver certeza que está logado e montado
-  useEffect(() => {
-    if (mounted && !loading && user) {
+    if (!loading && user) {
       window.location.replace('/');
     }
-  }, [mounted, loading, user]);
+  }, [loading, user]);
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm(p => ({ ...p, [k]: k === 'email' ? e.target.value.toLowerCase() : e.target.value }));
@@ -73,13 +67,6 @@ export default function LoginPage() {
       setIsLoading(false);
     }
   };
-
-  // 3. A MÁGICA CONTRA O ERRO 418: Se não estiver montado no navegador, retorna null
-  // Isso impede que o Servidor e o Navegador briguem pelo HTML.
-  if (!mounted) return null;
-
-  // Se já estiver logado, não desenha a tela de login (evita piscar a tela)
-  if (user) return null;
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)', padding: 24 }}>

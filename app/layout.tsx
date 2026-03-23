@@ -1,6 +1,3 @@
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
-
 import './globals.css';
 import { AuthProvider } from '@/lib/authContext';
 import { ThemeProvider } from '@/components/ui/ThemeProvider';
