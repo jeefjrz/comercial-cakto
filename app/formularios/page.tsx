@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Plus, ChevronLeft, Pencil, Trash2, Eye, Copy, GripVertical, Settings, Link, Loader2 } from 'lucide-react';
+import { Plus, ChevronLeft, Pencil, Trash2, Eye, Copy, GripVertical, Settings, Link, Loader2, Globe, Image } from 'lucide-react';
 import { useAuth } from '@/lib/authContext';
 import { Header } from '@/components/Header';
 import { PillTabs } from '@/components/ui/PillTabs';
@@ -15,19 +15,30 @@ import { supabase } from '@/lib/supabase/client';
 import { logAudit } from '@/lib/supabase/audit';
 import type { FormType, FormStatus, Json } from '@/lib/supabase/database.types';
 
+type FormField = {
+  id: number;
+  type: string;
+  label: string;
+  placeholder?: string;
+  required: boolean;
+  options?: string; // comma-separated, only for Select
+};
+
 type DbForm = {
-  id: string
-  name: string
-  type: FormType
-  slug: string
-  responses: number
-  active: boolean
-  color: string
-  status: FormStatus
-  fields: Json
-  embed_code: string
-  webhook: string
-}
+  id: string;
+  name: string;
+  type: FormType;
+  slug: string;
+  responses: number;
+  active: boolean;
+  color: string;
+  status: FormStatus;
+  fields: Json;
+  embed_code: string;
+  webhook: string;
+  custom_domain: string;
+  background_image: string;
+};
 
 type SubView = 'list' | 'editor' | 'responses';
 
@@ -35,7 +46,8 @@ const FORM_FIELD_TYPES = ['Texto', 'Email', 'Telefone', 'CPF', 'CEP', 'Endereço
 
 const EMPTY_FORM: DbForm = {
   id: '', name: 'Novo Formulário', type: 'Cadastro', slug: '', responses: 0,
-  active: true, color: '#2997FF', status: 'Rascunho', fields: [], embed_code: '', webhook: '',
+  active: true, color: '#2997FF', status: 'Rascunho', fields: [], embed_code: '',
+  webhook: '', custom_domain: '', background_image: '',
 };
 
 export default function FormulariosPage() {
@@ -56,9 +68,9 @@ function FormulariosContent() {
   const [selectedForm, setSelectedForm] = useState<DbForm | null>(null);
   const [deleteModal, setDeleteModal] = useState<string | null>(null);
 
-  // ── Fetch ──────────────────────────────────────────────────────────────────
   useEffect(() => {
-    supabase.from('forms').select('id,name,type,slug,responses,active,color,status,fields,embed_code,webhook')
+    supabase.from('forms')
+      .select('id,name,type,slug,responses,active,color,status,fields,embed_code,webhook,custom_domain,background_image')
       .order('created_at', { ascending: false })
       .then(({ data, error }) => {
         if (error) toast(error.message, 'error');
@@ -100,6 +112,7 @@ function FormulariosContent() {
         name: updated.name, type: updated.type, slug, responses: 0,
         active: updated.active, color: updated.color, status: updated.status,
         fields: updated.fields, embed_code: '', webhook: updated.webhook,
+        custom_domain: updated.custom_domain, background_image: updated.background_image,
       }).select().single();
       if (error) { toast(error.message, 'error'); setIsSaving(false); return; }
       setForms(p => [data as DbForm, ...p]);
@@ -108,6 +121,7 @@ function FormulariosContent() {
       const { error } = await supabase.from('forms').update({
         name: updated.name, status: updated.status, fields: updated.fields,
         webhook: updated.webhook, color: updated.color, active: updated.active,
+        custom_domain: updated.custom_domain, background_image: updated.background_image,
       }).eq('id', updated.id);
       if (error) { toast(error.message, 'error'); setIsSaving(false); return; }
       setForms(p => p.map(f => f.id === updated.id ? { ...f, ...updated } : f));
@@ -120,7 +134,6 @@ function FormulariosContent() {
   if (view === 'editor' && selectedForm) {
     return <FormEditor form={selectedForm} onBack={() => setView('list')} onSave={handleSave} isSaving={isSaving} />;
   }
-
   if (view === 'responses' && selectedForm) {
     return <FormResponses form={selectedForm} onBack={() => setView('list')} />;
   }
@@ -129,8 +142,7 @@ function FormulariosContent() {
     return (
       <>
         <Header />
-        <div className="page-wrap" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center',
-          minHeight: 300, gap: 10, color: 'var(--text2)' }}>
+        <div className="page-wrap" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 300, gap: 10, color: 'var(--text2)' }}>
           <Loader2 size={20} style={{ animation: 'spin 1s linear infinite' }} />
           <span style={{ fontSize: 14 }}>Carregando formulários…</span>
         </div>
@@ -164,8 +176,9 @@ function FormulariosContent() {
               <div style={{ display: 'flex', gap: 16, fontSize: 13, color: 'var(--text2)' }}>
                 <span>{Array.isArray(f.fields) ? (f.fields as unknown[]).length : 0} campos</span>
                 <span>{f.responses} respostas</span>
+                {f.custom_domain && <span style={{ color: 'var(--action)' }}>🌐 {f.custom_domain}</span>}
               </div>
-              <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 <Button size="sm" icon={Pencil} onClick={() => openEditor(f)}>Editar</Button>
                 <Button size="sm" variant="secondary" icon={Eye} onClick={() => openResponses(f)}>Respostas</Button>
                 <Button size="sm" variant="ghost" icon={Copy} onClick={() => {
@@ -197,26 +210,63 @@ function FormulariosContent() {
 const EDITOR_TABS = ['Design', 'Campos', 'Configurações', 'Integrações'];
 
 function FormEditor({ form, onBack, onSave, isSaving }: {
-  form: DbForm; onBack: () => void; onSave: (f: DbForm) => void; isSaving: boolean
+  form: DbForm; onBack: () => void; onSave: (f: DbForm) => void; isSaving: boolean;
 }) {
-  const [tab, setTab]         = useState('Campos');
-  const [name, setName]       = useState(form.name);
-  const [status, setStatus]   = useState<FormStatus>(form.status);
-  const [color, setColor]     = useState(form.color || '#2997FF');
-  const [fields, setFields]   = useState<any[]>(Array.isArray(form.fields) ? form.fields as any[] : []);
-  const [webhook, setWebhook] = useState(form.webhook || '');
-  const [addingField, setAddingField] = useState(false);
-  const [newFieldType, setNewFieldType]   = useState('Texto');
-  const [newFieldLabel, setNewFieldLabel] = useState('');
+  const [tab, setTab]               = useState('Campos');
+  const [name, setName]             = useState(form.name);
+  const [status, setStatus]         = useState<FormStatus>(form.status);
+  const [color, setColor]           = useState(form.color || '#2997FF');
+  const [fields, setFields]         = useState<FormField[]>(Array.isArray(form.fields) ? form.fields as FormField[] : []);
+  const [webhook, setWebhook]       = useState(form.webhook || '');
+  const [customDomain, setCustomDomain]     = useState(form.custom_domain || '');
+  const [backgroundImage, setBackgroundImage] = useState(form.background_image || '');
+
+  // ── Add field state ──
+  const [addingField, setAddingField]         = useState(false);
+  const [newFieldType, setNewFieldType]       = useState('Texto');
+  const [newFieldLabel, setNewFieldLabel]     = useState('');
+  const [newFieldPlaceholder, setNewFieldPlaceholder] = useState('');
+  const [newFieldOptions, setNewFieldOptions] = useState('');
+
+  // ── Edit field state ──
+  const [editingId, setEditingId]               = useState<number | null>(null);
+  const [editLabel, setEditLabel]               = useState('');
+  const [editPlaceholder, setEditPlaceholder]   = useState('');
+  const [editOptions, setEditOptions]           = useState('');
 
   function addField() {
     if (!newFieldLabel) return;
-    setFields(p => [...p, { id: Date.now(), type: newFieldType, label: newFieldLabel, required: false }]);
-    setNewFieldLabel(''); setAddingField(false);
+    setFields(p => [...p, {
+      id: Date.now(), type: newFieldType, label: newFieldLabel,
+      placeholder: newFieldPlaceholder || undefined,
+      required: false,
+      options: newFieldType === 'Select' ? newFieldOptions : undefined,
+    }]);
+    setNewFieldLabel(''); setNewFieldPlaceholder(''); setNewFieldOptions('');
+    setAddingField(false);
+  }
+
+  function startEdit(f: FormField) {
+    setEditingId(f.id);
+    setEditLabel(f.label);
+    setEditPlaceholder(f.placeholder || '');
+    setEditOptions(f.options || '');
+  }
+
+  function saveEdit() {
+    setFields(p => p.map(f => f.id === editingId
+      ? { ...f, label: editLabel, placeholder: editPlaceholder || undefined, options: f.type === 'Select' ? editOptions : f.options }
+      : f
+    ));
+    setEditingId(null);
   }
 
   function removeField(id: number) { setFields(p => p.filter(f => f.id !== id)); }
   function toggleRequired(id: number) { setFields(p => p.map(f => f.id === id ? { ...f, required: !f.required } : f)); }
+
+  function buildForm(): DbForm {
+    return { ...form, name, status, fields: fields as unknown as Json, webhook, color, custom_domain: customDomain, background_image: backgroundImage };
+  }
 
   return (
     <>
@@ -227,7 +277,7 @@ function FormEditor({ form, onBack, onSave, isSaving }: {
           <h1 style={{ fontSize: 22, fontWeight: 800, flex: 1 }}>{name}</h1>
           <Sel value={status} onChange={v => setStatus(v as FormStatus)}
             options={['Rascunho', 'Publicado', 'Arquivado']} placeholder="Status" />
-          <Button onClick={() => onSave({ ...form, name, status, fields, webhook, color })} disabled={isSaving}>
+          <Button onClick={() => onSave(buildForm())} disabled={isSaving}>
             {isSaving ? 'Salvando…' : 'Salvar'}
           </Button>
         </div>
@@ -235,7 +285,7 @@ function FormEditor({ form, onBack, onSave, isSaving }: {
         <PillTabs tabs={EDITOR_TABS} active={tab} onChange={setTab} />
 
         <div style={{ marginTop: 20 }}>
-          {/* Design */}
+          {/* ── Design ── */}
           {tab === 'Design' && (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
               <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 24 }}>
@@ -244,57 +294,103 @@ function FormEditor({ form, onBack, onSave, isSaving }: {
                   <Field label="Título do Formulário">
                     <input className="inp" value={name} onChange={e => setName(e.target.value)} />
                   </Field>
-                  <Field label="Descrição">
-                    <textarea className="inp" rows={3} placeholder="Descrição opcional..." style={{ resize: 'vertical' }} />
-                  </Field>
                   <Field label="Cor de Destaque">
-                    <input className="inp" type="color" value={color} onChange={e => setColor(e.target.value)} style={{ height: 40, padding: '4px 8px', cursor: 'pointer' }} />
+                    <input className="inp" type="color" value={color} onChange={e => setColor(e.target.value)}
+                      style={{ height: 40, padding: '4px 8px', cursor: 'pointer' }} />
+                  </Field>
+                  <Field label="Imagem de Fundo (URL)">
+                    <div style={{ position: 'relative' }}>
+                      <input className="inp" value={backgroundImage} onChange={e => setBackgroundImage(e.target.value)}
+                        placeholder="https://..." style={{ paddingLeft: 38 }} />
+                      <div style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)' }}>
+                        <Image size={15} color="var(--text2)" />
+                      </div>
+                    </div>
                   </Field>
                 </div>
               </div>
               <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 24 }}>
                 <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 16 }}>Preview</div>
-                <div style={{ background: 'var(--bg-card2)', borderRadius: 12, padding: 20 }}>
-                  <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 8 }}>{name}</div>
-                  {fields.slice(0, 3).map(f => (
-                    <div key={f.id} style={{ marginBottom: 12 }}>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text2)', marginBottom: 4 }}>{f.label}{f.required && ' *'}</div>
-                      <div style={{ height: 36, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8 }} />
+                <div style={{
+                  borderRadius: 12, padding: 20, minHeight: 160,
+                  backgroundImage: backgroundImage ? `url(${backgroundImage})` : undefined,
+                  backgroundSize: 'cover', backgroundPosition: 'center',
+                  background: backgroundImage ? undefined : 'var(--bg-card2)',
+                  position: 'relative',
+                }}>
+                  <div style={{ background: 'rgba(0,0,0,.55)', borderRadius: 10, padding: 16 }}>
+                    <div style={{ fontWeight: 700, fontSize: 15, color: '#fff', marginBottom: 8 }}>{name}</div>
+                    {fields.slice(0, 2).map(f => (
+                      <div key={f.id} style={{ marginBottom: 10 }}>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: 'rgba(255,255,255,.6)', marginBottom: 4 }}>{f.label}{f.required && ' *'}</div>
+                        <div style={{ height: 30, background: 'rgba(255,255,255,.1)', borderRadius: 6 }} />
+                      </div>
+                    ))}
+                    {fields.length > 2 && <div style={{ fontSize: 11, color: 'rgba(255,255,255,.4)' }}>+{fields.length - 2} campos…</div>}
+                    <div style={{ marginTop: 12, height: 32, background: color, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: '#fff' }}>Enviar</span>
                     </div>
-                  ))}
-                  {fields.length > 3 && <div style={{ fontSize: 12, color: 'var(--text2)' }}>+{fields.length - 3} campos...</div>}
-                  <div style={{ marginTop: 16, height: 36, background: color, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: 'white' }}>Enviar</span>
                   </div>
                 </div>
               </div>
             </div>
           )}
 
-          {/* Campos */}
+          {/* ── Campos ── */}
           {tab === 'Campos' && (
             <div style={{ maxWidth: 600 }}>
               <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 20, marginBottom: 12 }}>
+                {fields.length === 0 && (
+                  <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text2)', fontSize: 14 }}>
+                    Nenhum campo. Adicione o primeiro abaixo.
+                  </div>
+                )}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {fields.length === 0 && (
-                    <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text2)', fontSize: 14 }}>
-                      Nenhum campo. Adicione o primeiro abaixo.
-                    </div>
-                  )}
                   {fields.map(f => (
-                    <div key={f.id} style={{
-                      display: 'flex', alignItems: 'center', gap: 10,
-                      padding: 14, background: 'var(--bg-card2)', borderRadius: 10, border: '1px solid var(--border)'
-                    }}>
-                      <GripVertical size={16} color="var(--text2)" style={{ cursor: 'grab', flexShrink: 0 }} />
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: 600, fontSize: 13 }}>{f.label}</div>
-                        <div style={{ fontSize: 11, color: 'var(--text2)' }}>{f.type}{f.required ? ' · Obrigatório' : ''}</div>
-                      </div>
-                      <Toggle value={f.required} onChange={() => toggleRequired(f.id)} />
-                      <button onClick={() => removeField(f.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', padding: 4 }}>
-                        <Trash2 size={15} />
-                      </button>
+                    <div key={f.id}>
+                      {editingId === f.id ? (
+                        /* ── Inline edit form ── */
+                        <div style={{ padding: 16, background: 'color-mix(in srgb, var(--action) 8%, var(--bg-card2))', borderRadius: 10, border: '1px solid var(--action)' }}>
+                          <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 12 }}>Editar Campo — {f.type}</div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                            <Field label="Rótulo">
+                              <input className="inp" value={editLabel} onChange={e => setEditLabel(e.target.value)} autoFocus />
+                            </Field>
+                            {f.type !== 'Select' && (
+                              <Field label="Placeholder">
+                                <input className="inp" value={editPlaceholder} onChange={e => setEditPlaceholder(e.target.value)} placeholder="Texto de exemplo…" />
+                              </Field>
+                            )}
+                            {f.type === 'Select' && (
+                              <Field label="Opções (separadas por vírgula)">
+                                <input className="inp" value={editOptions} onChange={e => setEditOptions(e.target.value)} placeholder="Opção 1, Opção 2, Opção 3" />
+                              </Field>
+                            )}
+                            <div style={{ display: 'flex', gap: 8 }}>
+                              <Button size="sm" onClick={saveEdit}>Salvar</Button>
+                              <Button size="sm" variant="ghost" onClick={() => setEditingId(null)}>Cancelar</Button>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        /* ── Field row ── */
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 14, background: 'var(--bg-card2)', borderRadius: 10, border: '1px solid var(--border)' }}>
+                          <GripVertical size={16} color="var(--text2)" style={{ cursor: 'grab', flexShrink: 0 }} />
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: 600, fontSize: 13 }}>{f.label}</div>
+                            <div style={{ fontSize: 11, color: 'var(--text2)' }}>
+                              {f.type}{f.required ? ' · Obrigatório' : ''}{f.type === 'Select' && f.options ? ` · ${f.options.split(',').length} opções` : ''}
+                            </div>
+                          </div>
+                          <Toggle value={f.required} onChange={() => toggleRequired(f.id)} />
+                          <button onClick={() => startEdit(f)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--action)', padding: 4 }} title="Editar campo">
+                            <Pencil size={14} />
+                          </button>
+                          <button onClick={() => removeField(f.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', padding: 4 }} title="Remover campo">
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -305,14 +401,24 @@ function FormEditor({ form, onBack, onSave, isSaving }: {
                   <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 14 }}>Novo Campo</div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                     <Field label="Tipo do Campo">
-                      <Sel value={newFieldType} onChange={setNewFieldType} options={FORM_FIELD_TYPES} placeholder="Tipo" />
+                      <Sel value={newFieldType} onChange={v => { setNewFieldType(v); setNewFieldOptions(''); }} options={FORM_FIELD_TYPES} placeholder="Tipo" />
                     </Field>
                     <Field label="Rótulo">
                       <input className="inp" value={newFieldLabel} onChange={e => setNewFieldLabel(e.target.value)} placeholder="Ex: Nome completo" autoFocus />
                     </Field>
+                    {newFieldType !== 'Select' && (
+                      <Field label="Placeholder">
+                        <input className="inp" value={newFieldPlaceholder} onChange={e => setNewFieldPlaceholder(e.target.value)} placeholder="Texto de exemplo…" />
+                      </Field>
+                    )}
+                    {newFieldType === 'Select' && (
+                      <Field label="Opções (separadas por vírgula)">
+                        <input className="inp" value={newFieldOptions} onChange={e => setNewFieldOptions(e.target.value)} placeholder="Opção 1, Opção 2, Opção 3" />
+                      </Field>
+                    )}
                     <div style={{ display: 'flex', gap: 8 }}>
                       <Button onClick={addField}>Adicionar Campo</Button>
-                      <Button variant="ghost" onClick={() => setAddingField(false)}>Cancelar</Button>
+                      <Button variant="ghost" onClick={() => { setAddingField(false); setNewFieldLabel(''); setNewFieldOptions(''); }}>Cancelar</Button>
                     </div>
                   </div>
                 </div>
@@ -324,16 +430,29 @@ function FormEditor({ form, onBack, onSave, isSaving }: {
             </div>
           )}
 
-          {/* Configurações */}
+          {/* ── Configurações ── */}
           {tab === 'Configurações' && (
             <div style={{ maxWidth: 500, display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 24 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+                  <Globe size={18} color="var(--action)" />
+                  <div style={{ fontWeight: 700, fontSize: 14 }}>Domínio Customizado</div>
+                </div>
+                <Field label="Domínio Customizado (Opcional)">
+                  <input className="inp" value={customDomain} onChange={e => setCustomDomain(e.target.value.toLowerCase())}
+                    placeholder="premiacaocakto.site" />
+                </Field>
+                <p style={{ fontSize: 12, color: 'var(--text2)', marginTop: 8, lineHeight: 1.5 }}>
+                  Aponte o DNS do seu domínio para a Vercel. Quando acessado, este formulário será exibido automaticamente.
+                </p>
+              </div>
               <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 24 }}>
                 <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 16 }}>Comportamento</div>
                 {[
                   { label: 'Múltiplas respostas por usuário', key: 'multi' },
-                  { label: 'Exibir progresso no formulário',  key: 'progress' },
-                  { label: 'Confirmação por e-mail',           key: 'email' },
-                  { label: 'Redirecionar após envio',          key: 'redirect' },
+                  { label: 'Exibir progresso no formulário', key: 'progress' },
+                  { label: 'Confirmação por e-mail', key: 'email' },
+                  { label: 'Redirecionar após envio', key: 'redirect' },
                 ].map((opt, i, arr) => (
                   <div key={opt.key} style={{
                     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
@@ -347,7 +466,7 @@ function FormEditor({ form, onBack, onSave, isSaving }: {
             </div>
           )}
 
-          {/* Integrações */}
+          {/* ── Integrações ── */}
           {tab === 'Integrações' && (
             <div style={{ maxWidth: 560, display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 24 }}>
@@ -358,9 +477,9 @@ function FormEditor({ form, onBack, onSave, isSaving }: {
                 <div style={{ background: 'var(--bg-card2)', borderRadius: 8, padding: 12, fontFamily: 'monospace', fontSize: 12, color: 'var(--text2)', wordBreak: 'break-all', marginBottom: 12 }}>
                   {`<iframe src="https://forms.cakto.com.br/${form.id || '[id após salvar]'}" width="100%" height="600" />`}
                 </div>
-                <Button variant="secondary" icon={Copy} onClick={() => {
-                  navigator.clipboard.writeText(`<iframe src="https://forms.cakto.com.br/${form.id}" />`);
-                }}>Copiar Embed</Button>
+                <Button variant="secondary" icon={Copy} onClick={() => navigator.clipboard.writeText(`<iframe src="https://forms.cakto.com.br/${form.id}" />`)}>
+                  Copiar Embed
+                </Button>
               </div>
               <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 24 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
@@ -392,8 +511,7 @@ function FormResponses({ form, onBack }: { form: DbForm; onBack: () => void }) {
             <div style={{ fontSize: 13, color: 'var(--text2)' }}>{form.responses} respostas registradas</div>
           </div>
         </div>
-        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 48,
-          textAlign: 'center', color: 'var(--text2)' }}>
+        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 48, textAlign: 'center', color: 'var(--text2)' }}>
           <div style={{ fontSize: 14 }}>As respostas deste formulário são coletadas via webhook externo.</div>
           <div style={{ fontSize: 13, marginTop: 8 }}>Integre com o Make, Zapier ou N8N para receber as submissões.</div>
         </div>

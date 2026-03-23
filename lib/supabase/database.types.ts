@@ -74,17 +74,20 @@ export interface Database {
         Row: {
           id: string; name: string; type: FormType; slug: string; responses: number
           active: boolean; color: string; status: FormStatus; fields: Json
-          embed_code: string; webhook: string; created_at: string; updated_at: string
+          embed_code: string; webhook: string; custom_domain: string; background_image: string
+          created_at: string; updated_at: string
         }
         Insert: {
           id?: string; name: string; type: FormType; slug: string; responses?: number
           active?: boolean; color?: string; status?: FormStatus; fields?: Json
-          embed_code?: string; webhook?: string; created_at?: string; updated_at?: string
+          embed_code?: string; webhook?: string; custom_domain?: string; background_image?: string
+          created_at?: string; updated_at?: string
         }
         Update: {
           id?: string; name?: string; type?: FormType; slug?: string; responses?: number
           active?: boolean; color?: string; status?: FormStatus; fields?: Json
-          embed_code?: string; webhook?: string; updated_at?: string
+          embed_code?: string; webhook?: string; custom_domain?: string; background_image?: string
+          updated_at?: string
         }
         Relationships: []
       }
