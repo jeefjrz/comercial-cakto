@@ -5,7 +5,7 @@ export const revalidate = 0;
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Users, Zap, FileText, CreditCard, LayoutDashboard, Trophy, Package, Calendar, Download, Loader2 } from 'lucide-react';
+import { Users, Zap, FileText, CreditCard, LayoutDashboard, Trophy, Package, Calendar, Loader2 } from 'lucide-react';
 import { useAuth } from '@/lib/authContext';
 import { Header } from '@/components/Header';
 import { KpiCard } from '@/components/ui/KpiCard';
@@ -39,43 +39,44 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
-    if (!mounted) return;
+    if (!mounted || loading) return;
 
-    if (!loading && !user) {
+    if (!user) {
       window.location.replace('/login');
       return;
     }
 
-    if (!user || user.role !== 'Admin') return;
-
-    const todayStr = new Date().toISOString().split('T')[0];
-
+    // Só busca dados se for Admin e se as tabelas existirem
     const fetchData = async () => {
+      if (user.role !== 'Admin') return;
+
       try {
-        const [au, ta, af, pp, logs] = await Promise.all([
-          supabase.from('users').select('id', { count: 'exact', head: true }).eq('active', true),
-          supabase.from('activations').select('id', { count: 'exact', head: true }).eq('date', todayStr),
-          supabase.from('forms').select('id', { count: 'exact', head: true }).eq('active', true),
-          supabase.from('payments').select('id', { count: 'exact', head: true }).eq('status', 'Pendente'),
-          supabase.from('audit_logs').select('id,user_name,action,module,created_at').order('created_at', { ascending: false }).limit(10),
-        ]);
+        const todayStr = new Date().toISOString().split('T')[0];
+
+        // Usamos queries separadas para evitar que um erro em uma tabela trave as outras (Erro 500)
+        const { count: usersCount } = await supabase.from('users').select('*', { count: 'exact', head: true }).eq('active', true);
+        const { count: activationsCount } = await supabase.from('activations').select('*', { count: 'exact', head: true }).eq('date', todayStr);
+        const { count: formsCount } = await supabase.from('forms').select('*', { count: 'exact', head: true }).eq('active', true);
+        const { count: paymentsCount } = await supabase.from('payments').select('*', { count: 'exact', head: true }).eq('status', 'Pendente');
+        const { data: logsData } = await supabase.from('audit_logs').select('id,user_name,action,module,created_at').order('created_at', { ascending: false }).limit(10);
 
         setKpis({
-          activeUsers: au.count || 0,
-          todayActivations: ta.count || 0,
-          activeForms: af.count || 0,
-          pendingPayments: pp.count || 0
+          activeUsers: usersCount || 0,
+          todayActivations: activationsCount || 0,
+          activeForms: formsCount || 0,
+          pendingPayments: paymentsCount || 0
         });
 
-        if (logs.data) setAuditLogs(logs.data as AuditLog[]);
+        if (logsData) setAuditLogs(logsData as AuditLog[]);
       } catch (err) {
-        console.error('Erro ao carregar KPIs:', err);
+        console.error('Erro silencioso no FetchData:', err);
       }
     };
 
     fetchData();
   }, [user, loading, mounted]);
 
+  // Se não estiver montado ou estiver carregando, mostra o loader em vez de dar erro 500
   if (!mounted || loading || !user) {
     return (
       <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)' }}>
@@ -141,16 +142,11 @@ export default function HomePage() {
             </div>
 
             <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, overflow: 'hidden' }}>
-              <div style={{
-                padding: '16px 20px', borderBottom: '1px solid var(--border)',
-                display: 'flex', justifyContent: 'space-between', alignItems: 'center'
-              }}>
+              <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontWeight: 700, fontSize: 15 }}>Log de Auditoria</span>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <Button size="sm" variant="secondary" onClick={() => router.push('/pagamentos')}>
-                    Ver Pagamentos
-                  </Button>
-                </div>
+                <Button size="sm" variant="secondary" onClick={() => router.push('/pagamentos')}>
+                  Ver Pagamentos
+                </Button>
               </div>
               <div className="scroll-x">
                 <table className="tbl">
@@ -158,26 +154,25 @@ export default function HomePage() {
                     <tr><th>Usuário</th><th>Ação</th><th>Módulo</th><th>Data</th></tr>
                   </thead>
                   <tbody>
-                    {auditLogs.length === 0 && (
-                      <tr><td colSpan={4} style={{ textAlign: 'center', color: 'var(--text2)', padding: 24 }}>
-                        Nenhuma ação registrada ainda.
-                      </td></tr>
+                    {auditLogs.length === 0 ? (
+                      <tr><td colSpan={4} style={{ textAlign: 'center', color: 'var(--text2)', padding: 24 }}>Nenhuma ação registrada ainda.</td></tr>
+                    ) : (
+                      auditLogs.map(a => (
+                        <tr key={a.id}>
+                          <td>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <Avatar name={a.user_name} size={28} />
+                              <span style={{ fontWeight: 600, fontSize: 13 }}>{a.user_name}</span>
+                            </div>
+                          </td>
+                          <td style={{ color: 'var(--text2)', fontSize: 13 }}>{a.action}</td>
+                          <td><Badge label={a.module} color="var(--action)" /></td>
+                          <td style={{ color: 'var(--text2)', fontSize: 12 }}>
+                            {new Date(a.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                          </td>
+                        </tr>
+                      ))
                     )}
-                    {auditLogs.map(a => (
-                      <tr key={a.id}>
-                        <td>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <Avatar name={a.user_name} size={28} />
-                            <span style={{ fontWeight: 600, fontSize: 13 }}>{a.user_name}</span>
-                          </div>
-                        </td>
-                        <td style={{ color: 'var(--text2)', fontSize: 13 }}>{a.action}</td>
-                        <td><Badge label={a.module} color="var(--action)" /></td>
-                        <td style={{ color: 'var(--text2)', fontSize: 12 }}>
-                          {new Date(a.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                        </td>
-                      </tr>
-                    ))}
                   </tbody>
                 </table>
               </div>
