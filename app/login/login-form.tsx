@@ -23,9 +23,6 @@ export default function LoginForm() {
     if (!loading && user) window.location.replace('/');
   }, [loading, user]);
 
-  // Mostra nada enquanto o auth resolve (evita flash do form para usuário já logado)
-  if (loading) return null;
-
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm(p => ({ ...p, [k]: k === 'email' ? e.target.value.toLowerCase() : e.target.value }));
 
@@ -67,6 +64,9 @@ export default function LoginForm() {
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)', padding: 24 }}>
+      <h1 style={{ color: 'red', fontSize: '40px', position: 'fixed', top: 0, zIndex: 9999, background: 'yellow' }}>
+        TESTE DE VISIBILIDADE: SE VOCÊ ESTÁ VENDO ISSO, O FORM ESTÁ TENTANDO CARREGAR
+      </h1>
       <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}>
         <div style={{ position: 'absolute', top: '-20%', left: '-10%', width: 600, height: 600, borderRadius: '50%', background: 'radial-gradient(circle, rgba(41,151,255,.08) 0%, transparent 70%)' }} />
         <div style={{ position: 'absolute', bottom: '-10%', right: '-10%', width: 500, height: 500, borderRadius: '50%', background: 'radial-gradient(circle, rgba(191,90,242,.07) 0%, transparent 70%)' }} />
