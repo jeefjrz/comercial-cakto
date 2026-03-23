@@ -2,22 +2,16 @@
 import { useEffect, useState } from 'react';
 import { AuthProvider } from '@/lib/authContext';
 
-function AppShell() {
-  return <div style={{ minHeight: '100vh', background: '#000' }} />;
-}
-
 export default function ClientProviders({ children }: { children: React.ReactNode }) {
-  const [mounted, setMounted] = useState(false);
+  const [isMounted, setIsMounted] = useState(false);
 
   useEffect(() => {
-    setMounted(true);
+    setIsMounted(true);
   }, []);
 
-  if (!mounted) return <AppShell />;
+  if (!isMounted) {
+    return <div style={{ background: '#000', minHeight: '100vh' }} />;
+  }
 
-  return (
-    <AuthProvider>
-      {children}
-    </AuthProvider>
-  );
+  return <AuthProvider>{children}</AuthProvider>;
 }

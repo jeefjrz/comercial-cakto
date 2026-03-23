@@ -1,8 +1,6 @@
 'use client';
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { supabase } from './supabase/client';
-// supabase é um singleton criado no módulo (lib/supabase/client.ts) — uma única instância
-// compartilhada por toda a aplicação, evitando múltiplos GoTrue clients competindo pelo lock.
 
 export interface User {
   id: string;
@@ -22,8 +20,6 @@ interface AuthCtxValue {
   logout: () => Promise<void>;
 }
 
-// Valores default neutros — user: null, loading: true.
-// Idênticos no servidor e no cliente antes da hidratação → sem divergência de estado.
 const AuthCtx = createContext<AuthCtxValue>({
   user: null,
   loading: true,
@@ -43,7 +39,6 @@ async function fetchProfile(authId: string, email: string): Promise<User | null>
 
     if (data) return data as User;
 
-    // Trigger do banco pode ter atrasado — cria o perfil como fallback
     const fallback = {
       id: authId,
       name: email.split('@')[0],
@@ -65,22 +60,14 @@ async function fetchProfile(authId: string, email: string): Promise<User | null>
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  // Estado inicial null/true — mesmo valor no servidor e no cliente inicial.
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-
-  // useRef garante que o listener seja registrado uma única vez,
-  // mesmo no React StrictMode (que executa effects duas vezes em dev).
   const initialized = useRef(false);
 
   useEffect(() => {
     if (initialized.current) return;
     initialized.current = true;
 
-    // onAuthStateChange dispara INITIAL_SESSION automaticamente na montagem,
-    // entregando a sessão atual sem precisar de getSession() separado.
-    // Chamar getSession() + onAuthStateChange ao mesmo tempo causaria
-    // concorrência no lock "sb-...-auth-token" → erro de lock roubado.
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, session) => {
         if (session?.user) {

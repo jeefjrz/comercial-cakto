@@ -7,9 +7,6 @@ export const metadata: Metadata = {
   description: 'Sistema Comercial Interno',
 };
 
-// Server Component puro: sem 'use client', sem estado, sem lógica condicional no JSX.
-// suppressHydrationWarning em <html> e <body> silencia mismatches de atributos
-// injetados por extensões de browser (ex: dark-mode extensions, password managers).
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="pt-BR" suppressHydrationWarning>
