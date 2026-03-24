@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Users, Zap, FileText, CreditCard, LayoutDashboard, Trophy, Package, Calendar, Loader2 } from 'lucide-react';
 import { useAuth } from '@/lib/authContext';
@@ -30,6 +30,7 @@ export default function HomePage() {
   const [mounted, setMounted] = useState(false);
   const [kpis, setKpis] = useState({ activeUsers: 0, todayActivations: 0, activeForms: 0, pendingPayments: 0 });
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const redirected = useRef(false);
 
   useEffect(() => {
     setMounted(true);
@@ -39,8 +40,15 @@ export default function HomePage() {
     if (!mounted || loading) return;
 
     if (!user) {
-      window.location.replace('/login');
-      return;
+      // Aguarda 500ms para não redirecionar durante hidratação do contexto de auth
+      // (o onAuthStateChange pode ainda não ter rodado nesse momento)
+      const t = setTimeout(() => {
+        if (!redirected.current) {
+          redirected.current = true;
+          window.location.replace('/login');
+        }
+      }, 500);
+      return () => clearTimeout(t);
     }
 
     const fetchData = async () => {
@@ -151,7 +159,7 @@ export default function HomePage() {
                     {auditLogs.length === 0 ? (
                       <tr><td colSpan={4} style={{ textAlign: 'center', color: 'var(--text2)', padding: 24 }}>Nenhuma ação registrada ainda.</td></tr>
                     ) : (
-                      auditLogs.map(a => (
+                      auditLogs.map((a: AuditLog) => (
                         <tr key={a.id}>
                           <td>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
