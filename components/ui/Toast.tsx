@@ -1,4 +1,3 @@
-'use client';
 import { createContext, useCallback, useContext, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { CheckCircle, XCircle, Info, AlertTriangle, X } from 'lucide-react';

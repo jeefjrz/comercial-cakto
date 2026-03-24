@@ -1,6 +1,5 @@
-'use client';
 import { useState } from 'react';
-import { useRouter, usePathname } from 'next/navigation';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Zap, Sun, Moon, ChevronDown, Tag, Settings, LogOut } from 'lucide-react';
 import { useTheme } from './ui/ThemeProvider';
 import { Avatar } from './ui/Avatar';
@@ -20,8 +19,8 @@ const NAV_ITEMS = [
 export function Header() {
   const { user, logout } = useAuth();
   const { dark, toggle } = useTheme();
-  const router = useRouter();
-  const pathname = usePathname();
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
   const [ddOpen, setDdOpen] = useState(false);
 
   const nav = [
@@ -48,7 +47,7 @@ export function Header() {
       display: 'flex', alignItems: 'center', padding: '0 20px', gap: 12,
     }}>
       {/* Logo */}
-      <button onClick={() => router.push('/')}
+      <button onClick={() => navigate('/')}
         style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'none', border: 'none',
           cursor: 'pointer', flexShrink: 0 }}>
         <div style={{ width: 30, height: 30, borderRadius: 8,
@@ -64,7 +63,7 @@ export function Header() {
       {/* Nav */}
       <nav style={{ display: 'flex', alignItems: 'center', gap: 2, flex: 1, overflow: 'hidden', marginLeft: 8 }}>
         {nav.map(n => (
-          <button key={n.key} style={navLinkStyle(n.key)} onClick={() => router.push(`/${n.key}`)}
+          <button key={n.key} style={navLinkStyle(n.key)} onClick={() => navigate(`/${n.key}`)}
             onMouseEnter={e => { if (!isActive(n.key)) (e.currentTarget as HTMLButtonElement).style.color = 'var(--text)'; }}
             onMouseLeave={e => { if (!isActive(n.key)) (e.currentTarget as HTMLButtonElement).style.color = 'var(--text2)'; }}>
             {n.label}
@@ -99,8 +98,8 @@ export function Header() {
             { label: user?.name || '', icon: undefined, onClick: () => {}, style: { pointerEvents: 'none', opacity: 0.6 } },
             { label: user?.role || '', icon: 'Tag', onClick: () => {} },
             'divider',
-            { label: 'Configurações', icon: 'Settings', onClick: () => router.push('/configuracoes') },
-            { label: 'Sair', icon: 'LogOut', onClick: () => { logout(); router.push('/login'); }, danger: true },
+            { label: 'Configurações', icon: 'Settings', onClick: () => navigate('/configuracoes') },
+            { label: 'Sair', icon: 'LogOut', onClick: () => logout(), danger: true },
           ]}
         />
       </div>

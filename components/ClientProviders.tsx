@@ -1,4 +1,3 @@
-'use client';
 import { AuthProvider } from '@/lib/authContext';
 import { ThemeProvider } from '@/components/ui/ThemeProvider';
 

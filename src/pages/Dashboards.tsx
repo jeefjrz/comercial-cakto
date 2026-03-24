@@ -1,6 +1,6 @@
-'use client';
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useNavigate } from 'react-router-dom';
+
 import {
   BarChart2, User, TrendingUp, ChevronLeft,
   DollarSign, Phone, Target, Award, CheckCircle, AlertCircle, Loader2,
@@ -64,8 +64,9 @@ function LoadingView({ label }: { label: string }) {
 // ═══════════════════════════════════════════════════════════════════════════
 export default function DashboardsPage() {
   const { user, loading } = useAuth();
-  const router = useRouter();
-  useEffect(() => { if (!loading && !user) router.push('/login'); }, [user, loading, router]);
+  const navigate = useNavigate();
+  
+  useEffect(() => { if (!loading && !user) navigate('/login'); }, [user, loading, router]);
   if (loading || !user) return null;
   return <DashboardsContent />;
 }

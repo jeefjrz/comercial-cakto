@@ -1,6 +1,7 @@
-'use client';
+
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useNavigate } from 'react-router-dom';
+
 import { Plus, ChevronLeft, Pencil, Trash2, Eye, Copy, GripVertical, Settings, Link, Loader2, Globe, Image } from 'lucide-react';
 import { useAuth } from '@/lib/authContext';
 import { Header } from '@/components/Header';
@@ -52,8 +53,9 @@ const EMPTY_FORM: DbForm = {
 
 export default function FormulariosPage() {
   const { user, loading } = useAuth();
-  const router = useRouter();
-  useEffect(() => { if (!loading && !user) router.push('/login'); }, [user, loading, router]);
+  const navigate = useNavigate();
+  
+  useEffect(() => { if (!loading && !user) navigate('/login'); }, [user, loading, navigate]);
   if (loading || !user) return null;
   return <FormulariosContent />;
 }

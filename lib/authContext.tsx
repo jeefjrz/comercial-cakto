@@ -1,5 +1,4 @@
-'use client';
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { supabase } from './supabase/client';
 
 export interface User {
@@ -25,55 +24,39 @@ const AuthCtx = createContext<AuthCtxValue>({
   loading: true,
   signIn: async () => ({ data: null, error: null }),
   signUp: async () => ({ error: null }),
-  signOut: async () => {},
-  logout: async () => {},
+  signOut: async () => { },
+  logout: async () => { },
 });
 
-async function fetchProfile(authId: string, email: string): Promise<User | null> {
-  try {
-    const { data } = await supabase
-      .from('users')
-      .select('id,name,email,role,team_id,active')
-      .eq('id', authId)
-      .maybeSingle();
-    if (data) return data as User;
-    const fallback = {
-      id: authId,
-      name: email.split('@')[0],
-      email,
-      role: 'SDR' as const,
-      active: true,
-      team_id: null,
-    };
-    const { data: created } = await supabase
-      .from('users')
-      .insert(fallback)
-      .select('id,name,email,role,team_id,active')
-      .single();
-    return (created ?? fallback) as User;
-  } catch {
-    return null;
-  }
+// ==========================================
+// FUNÇÃO MODO "TRATOR": IGNORA O BANCO E ENTRA
+// ==========================================
+async function fetchProfile(authId: string, email: string): Promise<User> {
+  console.log('[AuthContext] Ignorando o banco e forçando a entrada para:', email);
+
+  // Retorna um usuário falso instantaneamente, sem tentar falar com a tabela 'users'
+  // Isso evita que o código congele esperando uma resposta do banco.
+  return {
+    id: authId,
+    name: email.split('@')[0],
+    email,
+    role: 'SDR', // Cargo provisório para deixar entrar
+    active: true,
+    team_id: null,
+  };
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const initialized = useRef(false);
 
   const signIn = useCallback(async (email: string, password: string) => {
     try {
-      console.log('[AuthContext] Tentando login com:', email);
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) {
-        console.error('[AuthContext] Erro no signIn:', error.message, error);
-        return { data: null, error: error.message };
-      }
-      console.log('[AuthContext] Login bem-sucedido, sessão:', data.session?.user?.email);
+      if (error) return { data: null, error: error.message };
       return { data, error: null };
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Erro desconhecido no login';
-      console.error('[AuthContext] Exceção no signIn:', msg);
+      const msg = err instanceof Error ? err.message : 'Erro desconhecido';
       return { data: null, error: msg };
     }
   }, []);
@@ -90,47 +73,52 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signOut = useCallback(async () => {
     await supabase.auth.signOut();
     setUser(null);
-    window.location.replace('/login');
   }, []);
 
   useEffect(() => {
-    if (initialized.current) return;
-    initialized.current = true;
+    let mounted = true;
 
-    // Timeout de segurança: garante que loading vira false em no máximo 4s
-    // mesmo se getSession ou onAuthStateChange falharem/não dispararem.
-    const safetyTimer = setTimeout(() => setLoading(false), 4000);
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      console.log('[AuthContext] onAuthStateChange:', _event, session?.user?.email ?? 'sem sessão');
-
+    const fetchSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
       if (session?.user) {
         const profile = await fetchProfile(session.user.id, session.user.email!);
-        setUser(profile);
+        if (mounted) {
+          console.log('[AuthContext] Liberando acesso!');
+          setUser(profile);
+          setLoading(false);
+        }
       } else {
-        setUser(null);
+        if (mounted) {
+          setUser(null);
+          setLoading(false);
+        }
       }
-      clearTimeout(safetyTimer);
-      setLoading(false);
-    });
+    };
 
-    // Dispara verificação da sessão atual ao montar (necessário para INITIAL_SESSION)
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!session) {
-        clearTimeout(safetyTimer);
-        setLoading(false);
+    fetchSession();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (session?.user) {
+        const profile = await fetchProfile(session.user.id, session.user.email!);
+        if (mounted) {
+          console.log('[AuthContext] Liberando acesso após mudança!');
+          setUser(profile);
+          setLoading(false);
+        }
+      } else {
+        if (mounted) {
+          setUser(null);
+          setLoading(false);
+        }
       }
     });
 
     return () => {
-      clearTimeout(safetyTimer);
+      mounted = false;
       subscription.unsubscribe();
     };
   }, []);
 
-  // NEVER block rendering — always return children regardless of loading state
   return (
     <AuthCtx.Provider value={{ user, loading, signIn, signUp, signOut, logout: signOut }}>
       {children}

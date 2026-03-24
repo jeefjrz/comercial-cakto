@@ -1,6 +1,7 @@
-'use client';
+
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useNavigate } from 'react-router-dom';
+
 import { Package, Plug, Plus, Pencil, Trash2, Link, Copy, RefreshCw, Loader2 } from 'lucide-react';
 import { useAuth } from '@/lib/authContext';
 import { Header } from '@/components/Header';
@@ -28,8 +29,9 @@ const AWARD_STATUS_COLORS: Record<string, string> = {
 
 export default function EstoquePage() {
   const { user, loading } = useAuth();
-  const router = useRouter();
-  useEffect(() => { if (!loading && !user) router.push('/login'); }, [user, loading, router]);
+  const navigate = useNavigate();
+  
+  useEffect(() => { if (!loading && !user) navigate('/login'); }, [user, loading, navigate]);
   if (loading || !user) return null;
   return <EstoqueContent />;
 }

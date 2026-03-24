@@ -1,6 +1,7 @@
-'use client';
+
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useNavigate } from 'react-router-dom';
+
 import { ChevronLeft, ChevronRight, Plus, Phone, Calendar, CheckCircle, XCircle, Clock, Loader2 } from 'lucide-react';
 import { useAuth } from '@/lib/authContext';
 import { Header } from '@/components/Header';
@@ -40,8 +41,9 @@ const EMPTY_FORM = { title: '', date: '', time: '', responsibleId: '', status: '
 
 export default function AgendaPage() {
   const { user, loading } = useAuth();
-  const router = useRouter();
-  useEffect(() => { if (!loading && !user) router.push('/login'); }, [user, loading, router]);
+  const navigate = useNavigate();
+  
+  useEffect(() => { if (!loading && !user) navigate('/login'); }, [user, loading, navigate]);
   if (loading || !user) return null;
   return <AgendaContent />;
 }

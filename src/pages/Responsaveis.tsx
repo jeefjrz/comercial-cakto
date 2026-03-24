@@ -1,6 +1,7 @@
-'use client';
+
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useNavigate } from 'react-router-dom';
+
 import { Search, Edit, Users, Plus, Lock, Loader2 } from 'lucide-react';
 import { useAuth } from '@/lib/authContext';
 import { useToast } from '@/components/ui/Toast';
@@ -34,9 +35,10 @@ const ROLES: UserRole[] = ['Closer', 'SDR', 'Gerente de Contas', 'Supervisor', '
 
 export default function ResponsaveisPage() {
   const { user, loading } = useAuth();
-  const router = useRouter();
+  const navigate = useNavigate();
+  
 
-  useEffect(() => { if (!loading && !user) router.push('/login'); }, [user, loading, router]);
+  useEffect(() => { if (!loading && !user) navigate('/login'); }, [user, loading, navigate]);
   if (loading || !user) return null;
 
   return <ResponsaveisContent isAdmin={user.role === 'Admin'} />;
