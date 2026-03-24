@@ -11,7 +11,14 @@ import Agenda from './pages/Agenda'
 import Dashboards from './pages/Dashboards'
 import PublicForm from './pages/PublicForm'
 
-const MAIN_DOMAINS = ['localhost', 'comercialcakto.site', 'comercial-cakto.vercel.app']
+const MAIN_DOMAINS = [
+  'localhost',
+  'comercialcakto.site',
+  'www.comercialcakto.site',
+  'caktocomercial.site',
+  'www.caktocomercial.site',
+  'comercial-cakto.vercel.app',
+]
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
