@@ -81,6 +81,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
+  // NEVER block rendering — always return children regardless of loading state
   return (
     <AuthCtx.Provider value={{ user, loading, signIn, signUp, signOut, logout: signOut }}>
       {children}
