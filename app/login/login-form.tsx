@@ -23,10 +23,22 @@ export default function LoginForm() {
     setErrorMsg('');
     if (!email || !password) { setErrorMsg('Preencha email e senha.'); return; }
     setIsSubmitting(true);
+    console.log('[LoginForm] Tentando login com:', email);
     try {
       const { error } = await signIn(email, password);
-      if (error) setErrorMsg(error.includes('Invalid login') ? 'E-mail ou senha incorretos.' : error);
-    } catch {
+      if (error) {
+        console.error('[LoginForm] Erro retornado pelo Supabase:', error);
+        // Exibe a mensagem original do Supabase para facilitar o debug
+        setErrorMsg(
+          error.toLowerCase().includes('invalid login')
+            ? 'E-mail ou senha incorretos. (Invalid login credentials)'
+            : error
+        );
+      } else {
+        console.log('[LoginForm] Login OK — aguardando redirecionamento via onAuthStateChange');
+      }
+    } catch (err) {
+      console.error('[LoginForm] Exceção inesperada:', err);
       setErrorMsg('Erro inesperado. Tente novamente.');
     } finally {
       setIsSubmitting(false);

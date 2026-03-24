@@ -1,5 +1,5 @@
 'use client';
-import { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { supabase } from './supabase/client';
 
 export interface User {
@@ -14,7 +14,7 @@ export interface User {
 interface AuthCtxValue {
   user: User | null;
   loading: boolean;
-  signIn: (email: string, password: string) => Promise<{ error: string | null }>;
+  signIn: (email: string, password: string) => Promise<{ data: unknown; error: string | null }>;
   signUp: (name: string, email: string, password: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
   logout: () => Promise<void>;
@@ -23,7 +23,7 @@ interface AuthCtxValue {
 const AuthCtx = createContext<AuthCtxValue>({
   user: null,
   loading: true,
-  signIn: async () => ({ error: null }),
+  signIn: async () => ({ data: null, error: null }),
   signUp: async () => ({ error: null }),
   signOut: async () => {},
   logout: async () => {},
@@ -37,8 +37,19 @@ async function fetchProfile(authId: string, email: string): Promise<User | null>
       .eq('id', authId)
       .maybeSingle();
     if (data) return data as User;
-    const fallback = { id: authId, name: email.split('@')[0], email, role: 'SDR' as const, active: true, team_id: null };
-    const { data: created } = await supabase.from('users').insert(fallback).select('id,name,email,role,team_id,active').single();
+    const fallback = {
+      id: authId,
+      name: email.split('@')[0],
+      email,
+      role: 'SDR' as const,
+      active: true,
+      team_id: null,
+    };
+    const { data: created } = await supabase
+      .from('users')
+      .insert(fallback)
+      .select('id,name,email,role,team_id,active')
+      .single();
     return (created ?? fallback) as User;
   } catch {
     return null;
@@ -48,14 +59,31 @@ async function fetchProfile(authId: string, email: string): Promise<User | null>
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const initialized = useRef(false);
 
   const signIn = useCallback(async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    return { error: error?.message ?? null };
+    try {
+      console.log('[AuthContext] Tentando login com:', email);
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) {
+        console.error('[AuthContext] Erro no signIn:', error.message, error);
+        return { data: null, error: error.message };
+      }
+      console.log('[AuthContext] Login bem-sucedido, sessão:', data.session?.user?.email);
+      return { data, error: null };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Erro desconhecido no login';
+      console.error('[AuthContext] Exceção no signIn:', msg);
+      return { data: null, error: msg };
+    }
   }, []);
 
   const signUp = useCallback(async (name: string, email: string, password: string) => {
-    const { error } = await supabase.auth.signUp({ email, password, options: { data: { full_name: name } } });
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { data: { full_name: name } },
+    });
     return { error: error?.message ?? null };
   }, []);
 
@@ -66,32 +94,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (initialized.current) return;
+    initialized.current = true;
+
     // Timeout de segurança: garante que loading vira false em no máximo 4s
     // mesmo se getSession ou onAuthStateChange falharem/não dispararem.
     const safetyTimer = setTimeout(() => setLoading(false), 4000);
 
-    supabase.auth.getSession()
-      .then(async ({ data: { session } }) => {
-        clearTimeout(safetyTimer);
-        if (session?.user) {
-          const profile = await fetchProfile(session.user.id, session.user.email!);
-          setUser(profile);
-        }
-        setLoading(false);
-      })
-      .catch(() => {
-        clearTimeout(safetyTimer);
-        setLoading(false);
-      });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      console.log('[AuthContext] onAuthStateChange:', _event, session?.user?.email ?? 'sem sessão');
       if (session?.user) {
         const profile = await fetchProfile(session.user.id, session.user.email!);
         setUser(profile);
       } else {
         setUser(null);
       }
+      clearTimeout(safetyTimer);
       setLoading(false);
+    });
+
+    // Dispara verificação da sessão atual ao montar (necessário para INITIAL_SESSION)
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!session) {
+        clearTimeout(safetyTimer);
+        setLoading(false);
+      }
     });
 
     return () => {
