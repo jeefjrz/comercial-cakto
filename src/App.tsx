@@ -11,16 +11,7 @@ import Agenda from './pages/Agenda'
 import Dashboards from './pages/Dashboards'
 import PublicForm from './pages/PublicForm'
 
-// Hostnames that belong to the internal panel
-const INTERNAL_HOSTS = ['localhost', '127.0.0.1']
-const APP_DOMAIN = import.meta.env.VITE_APP_DOMAIN as string | undefined
-
-function isInternalHost(hostname: string): boolean {
-  if (INTERNAL_HOSTS.includes(hostname)) return true
-  if (APP_DOMAIN && hostname === APP_DOMAIN) return true
-  if (hostname.endsWith('.vercel.app')) return true
-  return false
-}
+const MAIN_DOMAINS = ['localhost', 'comercialcakto.site', 'comercial-cakto.vercel.app']
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
@@ -33,7 +24,7 @@ export default function App() {
   const hostname = window.location.hostname
 
   // Custom domain: bypass the entire panel and serve the public form directly
-  if (!isInternalHost(hostname)) {
+  if (!MAIN_DOMAINS.includes(hostname)) {
     return <PublicForm customDomain={hostname} />
   }
 
