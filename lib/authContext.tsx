@@ -109,13 +109,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (session?.user) {
         const profile = await fetchProfile(session.user.id, session.user.email!);
         setUser(profile);
-
-        // Redireciona para home após login confirmado pelo Supabase
-        if (_event === 'SIGNED_IN') {
-          console.log('[AuthContext] Login detectado, redirecionando para /...');
-          // Usa replace para não empilhar histórico
-          window.location.replace('/');
-        }
       } else {
         setUser(null);
       }

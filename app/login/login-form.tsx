@@ -15,7 +15,10 @@ export default function LoginForm() {
   const [successMsg, setSuccessMsg] = useState('');
 
   useEffect(() => {
-    if (!loading && user) window.location.replace('/');
+    // Se o usuário já estiver logado, manda para a home com reload completo
+    if (!loading && user) {
+      window.location.href = '/';
+    }
   }, [loading, user]);
 
   async function handleLogin(e: React.FormEvent) {
@@ -28,14 +31,16 @@ export default function LoginForm() {
       const { error } = await signIn(email, password);
       if (error) {
         console.error('[LoginForm] Erro retornado pelo Supabase:', error);
-        // Exibe a mensagem original do Supabase para facilitar o debug
         setErrorMsg(
           error.toLowerCase().includes('invalid login')
             ? 'E-mail ou senha incorretos. (Invalid login credentials)'
             : error
         );
       } else {
-        console.log('[LoginForm] Login OK — aguardando redirecionamento via onAuthStateChange');
+        console.log('[LoginForm] Login OK — Forçando redirecionamento com reload completo...');
+        // O window.location.href garante que o Next.js recarregue tudo,
+        // limpando o estado do Supabase e sincronizando cookies com o Middleware.
+        window.location.href = '/';
       }
     } catch (err) {
       console.error('[LoginForm] Exceção inesperada:', err);
@@ -44,6 +49,7 @@ export default function LoginForm() {
       setIsSubmitting(false);
     }
   }
+
 
   async function handleRegister(e: React.FormEvent) {
     e.preventDefault();
