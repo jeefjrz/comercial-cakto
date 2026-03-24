@@ -223,6 +223,23 @@ function FormEditor({ form, onBack, onSave, isSaving }: {
   const [customDomain, setCustomDomain]     = useState(form.custom_domain || '');
   const [backgroundImage, setBackgroundImage] = useState(form.background_image || '');
 
+  // Behavior toggles — persisted in embed_code as JSON
+  const parsedBehaviors = (() => { try { return JSON.parse(form.embed_code || '{}').behaviors || {} } catch { return {} } })();
+  const [behaviors, setBehaviors] = useState<Record<string, boolean>>({
+    multi: parsedBehaviors.multi ?? false,
+    progress: parsedBehaviors.progress ?? false,
+    email: parsedBehaviors.email ?? false,
+    redirect: parsedBehaviors.redirect ?? false,
+  });
+
+  async function toggleBehavior(key: string) {
+    const next = { ...behaviors, [key]: !behaviors[key] };
+    setBehaviors(next);
+    if (form.id) {
+      await supabase.from('forms').update({ embed_code: JSON.stringify({ behaviors: next }) }).eq('id', form.id);
+    }
+  }
+
   // ── Add field state ──
   const [addingField, setAddingField]         = useState(false);
   const [newFieldType, setNewFieldType]       = useState('Texto');
@@ -447,6 +464,14 @@ function FormEditor({ form, onBack, onSave, isSaving }: {
                 <p style={{ fontSize: 12, color: 'var(--text2)', marginTop: 8, lineHeight: 1.5 }}>
                   Aponte o DNS do seu domínio para a Vercel. Quando acessado, este formulário será exibido automaticamente.
                 </p>
+                {!customDomain && form.id && (
+                  <div style={{ marginTop: 12, padding: '10px 12px', background: 'var(--bg-card2)', borderRadius: 8 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 4 }}>Link Padrão</div>
+                    <div style={{ fontSize: 12, color: 'var(--action)', wordBreak: 'break-all', fontFamily: 'monospace' }}>
+                      {window.location.origin}/f/{form.id}
+                    </div>
+                  </div>
+                )}
               </div>
               <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 24 }}>
                 <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 16 }}>Comportamento</div>
@@ -461,7 +486,7 @@ function FormEditor({ form, onBack, onSave, isSaving }: {
                     padding: '12px 0', borderBottom: i < arr.length - 1 ? '1px solid var(--border)' : 'none',
                   }}>
                     <span style={{ fontSize: 14 }}>{opt.label}</span>
-                    <Toggle value={false} onChange={() => {}} />
+                    <Toggle value={behaviors[opt.key] ?? false} onChange={() => toggleBehavior(opt.key)} />
                   </div>
                 ))}
               </div>
