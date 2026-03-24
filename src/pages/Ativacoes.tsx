@@ -21,7 +21,7 @@ type DbActivation = {
   id: string; client: string; email: string | null; phone: string | null
   channel: string; responsible: string; date: string; time: string | null
 }
-type DbUser = { id: string; name: string }
+type DbUser = { id: string; name: string; role: string }
 
 const CHANNELS: ActivationChannel[] = ['Inbound', 'Outbound', 'Indicação']
 const EMPTY_FORM = { client: '', email: '', channel: 'Inbound', responsible: '', date: '', phone: '+55 ' }
@@ -69,7 +69,7 @@ function AtivacoesContent({ isAdmin }: { isAdmin: boolean }) {
           .lte('date', dateRange.endDate)
           .order('date', { ascending: false })
           .order('time', { ascending: false }),
-        supabase.from('users').select('id,name').order('name'),
+        supabase.from('users').select('id,name,role').order('name'),
       ])
       if (ae) toast(ae.message, 'error')
       if (ue) toast(ue.message, 'error')
@@ -92,7 +92,10 @@ function AtivacoesContent({ isAdmin }: { isAdmin: boolean }) {
     const counts: Record<string, number> = {}
     activations.forEach(a => { counts[a.responsible] = (counts[a.responsible] || 0) + 1 })
     return Object.entries(counts)
-      .map(([userId, count]) => ({ userId, activations: count, name: getUserName(userId) }))
+      .map(([userId, count]) => {
+        const u = users.find(u => u.id === userId)
+        return { userId, activations: count, name: u?.name || '—', role: u?.role || '' }
+      })
       .sort((a, b) => b.activations - a.activations)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activations, users])
@@ -218,19 +221,40 @@ function AtivacoesContent({ isAdmin }: { isAdmin: boolean }) {
             </span>
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
             {rankingDisplay.slice(0, 6).map((r, i) => {
-              const pct = (r.activations / (rankingDisplay[0]?.activations || 1)) * 100
+              const pct = Math.round((r.activations / (rankingDisplay[0]?.activations || 1)) * 100)
+              const medals = ['🥇', '🥈', '🥉']
               return (
-                <div key={r.userId} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <span style={{ width: 22, textAlign: 'center', fontWeight: 800, fontSize: 14,
-                    color: medalColors[i] || 'var(--text2)' }}>{i + 1}</span>
-                  <Avatar name={r.name} size={30} />
-                  <span style={{ flex: 1, fontWeight: 600, fontSize: 13 }}>{r.name.split(' ').slice(0, 2).join(' ')}</span>
-                  <div style={{ width: 120, height: 6, background: 'var(--bg-card)', borderRadius: 3, overflow: 'hidden' }}>
-                    <div style={{ width: `${pct}%`, height: '100%', background: 'linear-gradient(90deg,var(--action),var(--purple))', borderRadius: 3 }} />
+                <div key={r.userId} style={{
+                  display: 'flex', alignItems: 'center', gap: 12,
+                  background: i < 3 ? `color-mix(in srgb, ${medalColors[i]} 8%, var(--bg-card2))` : 'var(--bg-card2)',
+                  border: `1px solid ${i < 3 ? `color-mix(in srgb, ${medalColors[i]} 25%, transparent)` : 'var(--border)'}`,
+                  borderRadius: 10, padding: '10px 14px',
+                }}>
+                  <span style={{ width: 24, textAlign: 'center', fontSize: i < 3 ? 20 : 13,
+                    fontWeight: 800, color: medalColors[i] || 'var(--text2)', lineHeight: 1 }}>
+                    {i < 3 ? medals[i] : i + 1}
+                  </span>
+                  <Avatar name={r.name} size={40} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {r.name.split(' ').slice(0, 2).join(' ')}
+                    </div>
+                    {r.role && (
+                      <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 2 }}>{r.role}</div>
+                    )}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
+                      <div style={{ flex: 1, height: 5, background: 'var(--bg-card)', borderRadius: 3, overflow: 'hidden' }}>
+                        <div style={{ width: `${pct}%`, height: '100%', background: i === 0 ? 'var(--gold)' : 'linear-gradient(90deg,var(--action),var(--purple))', borderRadius: 3, transition: 'width .4s ease' }} />
+                      </div>
+                      <span style={{ fontSize: 11, color: 'var(--text2)', whiteSpace: 'nowrap' }}>{pct}% do líder</span>
+                    </div>
                   </div>
-                  <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--text)', width: 24, textAlign: 'right' }}>{r.activations}</span>
+                  <div style={{ textAlign: 'right', minWidth: 40 }}>
+                    <div style={{ fontWeight: 800, fontSize: 22, color: i < 3 ? medalColors[i] : 'var(--text)', lineHeight: 1 }}>{r.activations}</div>
+                    <div style={{ fontSize: 10, color: 'var(--text2)', marginTop: 2 }}>ativações</div>
+                  </div>
                 </div>
               )
             })}

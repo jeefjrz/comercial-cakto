@@ -295,7 +295,7 @@ function FormEditor({ form, onBack, onSave, isSaving }: {
           <Button variant="ghost" icon={ChevronLeft} onClick={onBack}>Voltar</Button>
           <h1 style={{ fontSize: 22, fontWeight: 800, flex: 1 }}>{name}</h1>
           <Sel value={status} onChange={v => setStatus(v as FormStatus)}
-            options={['Rascunho', 'Publicado', 'Arquivado']} placeholder="Status" />
+            options={['Rascunho', 'Arquivado', 'Publicado']} placeholder="Status" />
           <Button onClick={() => onSave(buildForm())} disabled={isSaving}>
             {isSaving ? 'Salvando…' : 'Salvar'}
           </Button>

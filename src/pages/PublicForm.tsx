@@ -42,7 +42,7 @@ export default function PublicForm({ customDomain }: Props) {
 
       const { data, error: err } = await query.maybeSingle()
       if (err || !data) { setError('Formulário não encontrado.'); setLoading(false); return }
-      if (!data.active || data.status !== 'Publicado') { setError('Este formulário não está disponível.'); setLoading(false); return }
+      if (!data.active || data.status?.toLowerCase() !== 'publicado') { setError('Este formulário não está disponível.'); setLoading(false); return }
       setForm(data as DbForm)
       setLoading(false)
     }
