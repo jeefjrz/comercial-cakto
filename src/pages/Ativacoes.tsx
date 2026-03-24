@@ -10,12 +10,11 @@ import { Modal, ConfirmModal } from '@/components/ui/Modal'
 import { Sheet } from '@/components/ui/Sheet'
 import { Field, Sel } from '@/components/ui/Field'
 import { Divider } from '@/components/ui/Divider'
-import { BarChartH } from '@/components/ui/charts/BarChartH'
 import { DateFilter, DateRange } from '@/components/ui/DateFilter'
 import { supabase } from '@/lib/supabase/client'
 import { capitalize, formatDate, CHANNEL_COLORS } from '@/lib/utils'
 import type { ActivationChannel } from '@/lib/supabase/database.types'
-import { format, startOfMonth, endOfMonth } from 'date-fns'
+import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, subWeeks, subMonths, subDays } from 'date-fns'
 
 type DbActivation = {
   id: string; client: string; email: string | null; phone: string | null
@@ -49,6 +48,36 @@ function AtivacoesContent({ isAdmin }: { isAdmin: boolean }) {
   const [filterChannel, setFilterChannel] = useState('')
   const [filterUser, setFilterUser] = useState('')
   const [page, setPage] = useState(1)
+
+  const [kpis, setKpis] = useState({ today: 0, yesterday: 0, week: 0, weekPrev: 0, month: 0, monthPrev: 0, total: 0 })
+
+  useEffect(() => {
+    const now = new Date()
+    const todayStr = format(now, 'yyyy-MM-dd')
+    const yesterdayStr = format(subDays(now, 1), 'yyyy-MM-dd')
+    const weekStart = format(startOfWeek(now, { weekStartsOn: 1 }), 'yyyy-MM-dd')
+    const prevWeekStart = format(startOfWeek(subWeeks(now, 1), { weekStartsOn: 1 }), 'yyyy-MM-dd')
+    const prevWeekEnd = format(endOfWeek(subWeeks(now, 1), { weekStartsOn: 1 }), 'yyyy-MM-dd')
+    const monthStart = format(startOfMonth(now), 'yyyy-MM-dd')
+    const prevMonthStart = format(startOfMonth(subMonths(now, 1)), 'yyyy-MM-dd')
+    const prevMonthEnd = format(endOfMonth(subMonths(now, 1)), 'yyyy-MM-dd')
+    Promise.all([
+      supabase.from('activations').select('id', { count: 'exact', head: true }).eq('date', todayStr),
+      supabase.from('activations').select('id', { count: 'exact', head: true }).eq('date', yesterdayStr),
+      supabase.from('activations').select('id', { count: 'exact', head: true }).gte('date', weekStart).lte('date', todayStr),
+      supabase.from('activations').select('id', { count: 'exact', head: true }).gte('date', prevWeekStart).lte('date', prevWeekEnd),
+      supabase.from('activations').select('id', { count: 'exact', head: true }).gte('date', monthStart).lte('date', todayStr),
+      supabase.from('activations').select('id', { count: 'exact', head: true }).gte('date', prevMonthStart).lte('date', prevMonthEnd),
+      supabase.from('activations').select('id', { count: 'exact', head: true }),
+    ]).then(([r1, r2, r3, r4, r5, r6, r7]) => {
+      setKpis({
+        today: r1.count ?? 0, yesterday: r2.count ?? 0,
+        week: r3.count ?? 0, weekPrev: r4.count ?? 0,
+        month: r5.count ?? 0, monthPrev: r6.count ?? 0,
+        total: r7.count ?? 0,
+      })
+    })
+  }, [])
 
   const [modalNew, setModalNew] = useState(false)
   const [modalEdit, setModalEdit] = useState<DbActivation | null>(null)
@@ -99,10 +128,6 @@ function AtivacoesContent({ isAdmin }: { isAdmin: boolean }) {
       .sort((a, b) => b.activations - a.activations)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activations, users])
-
-  const rankingChart = rankingDisplay.slice(0, 6).map(r => ({
-    label: r.name.split(' ')[0], value: r.activations,
-  }))
 
   const filtered = activations.filter(a => {
     const q = search.toLowerCase()
@@ -265,7 +290,49 @@ function AtivacoesContent({ isAdmin }: { isAdmin: boolean }) {
             )}
           </div>
 
-          {rankingChart.length > 0 && <BarChartH data={rankingChart} labelKey="label" valueKey="value" />}
+          {/* ── KPI Cards ── */}
+          {(() => {
+            const todayDiff = kpis.today - kpis.yesterday
+            const weekPct = kpis.weekPrev > 0 ? Math.round((kpis.week - kpis.weekPrev) / kpis.weekPrev * 100) : null
+            const monthPct = kpis.monthPrev > 0 ? Math.round((kpis.month - kpis.monthPrev) / kpis.monthPrev * 100) : null
+            const cards = [
+              {
+                label: 'Ativações Hoje',
+                value: kpis.today,
+                sub: todayDiff === 0 ? 'igual a ontem' : `${todayDiff > 0 ? '+' : ''}${todayDiff} vs ontem`,
+                subColor: todayDiff > 0 ? 'var(--green)' : todayDiff < 0 ? 'var(--red)' : 'var(--text2)',
+              },
+              {
+                label: 'Esta Semana',
+                value: kpis.week,
+                sub: weekPct === null ? 'sem dados anteriores' : `${weekPct > 0 ? '+' : ''}${weekPct}% vs semana passada`,
+                subColor: weekPct !== null && weekPct > 0 ? 'var(--green)' : weekPct !== null && weekPct < 0 ? 'var(--red)' : 'var(--text2)',
+              },
+              {
+                label: 'Este Mês',
+                value: kpis.month,
+                sub: monthPct === null ? 'sem dados anteriores' : Math.abs(monthPct) <= 5 ? 'Estável' : `${monthPct > 0 ? '+' : ''}${monthPct}% vs mês passado`,
+                subColor: monthPct !== null && monthPct > 5 ? 'var(--green)' : monthPct !== null && monthPct < -5 ? 'var(--red)' : 'var(--text2)',
+              },
+              {
+                label: 'Total Geral',
+                value: kpis.total,
+                sub: 'desde o início',
+                subColor: 'var(--text2)',
+              },
+            ]
+            return (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
+                {cards.map(c => (
+                  <div key={c.label} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px 18px' }}>
+                    <div style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>{c.label}</div>
+                    <div style={{ fontSize: 32, fontWeight: 800, color: 'var(--text)', lineHeight: 1 }}>{c.value}</div>
+                    <div style={{ fontSize: 12, color: c.subColor, marginTop: 6, fontWeight: 500 }}>{c.sub}</div>
+                  </div>
+                ))}
+              </div>
+            )
+          })()}
         </div>
 
         {/* ── Filters ── */}

@@ -26,13 +26,17 @@ export default function PublicForm({ customDomain }: Props) {
   const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
+    const hostname = window.location.hostname
+    console.log('[PublicForm] Hostname atual:', hostname)
     async function load() {
       setLoading(true)
-      let query = supabase.from('forms').select('id,name,color,background_image,fields,webhook,active,status')
+      let query = supabase.from('forms').select('id,name,color,background_image,fields,webhook,active,status,custom_domain')
 
       if (customDomain) {
+        console.log('[PublicForm] Buscando por custom_domain:', customDomain)
         query = query.eq('custom_domain', customDomain)
       } else if (formId) {
+        console.log('[PublicForm] Buscando por formId:', formId)
         query = query.eq('id', formId)
       } else {
         setError('Formulário não encontrado.')
@@ -41,8 +45,16 @@ export default function PublicForm({ customDomain }: Props) {
       }
 
       const { data, error: err } = await query.maybeSingle()
+      console.log('[PublicForm] Resultado Supabase:', { data, err })
       if (err || !data) { setError('Formulário não encontrado.'); setLoading(false); return }
-      if (!data.active || data.status?.toLowerCase() !== 'publicado') { setError('Este formulário não está disponível.'); setLoading(false); return }
+      if (customDomain && data.custom_domain !== customDomain) {
+        console.log('[PublicForm] custom_domain não bate:', data.custom_domain, '!=', customDomain)
+        setError('Formulário não encontrado.'); setLoading(false); return
+      }
+      if (!data.active || data.status?.toLowerCase() !== 'publicado') {
+        console.log('[PublicForm] Formulário inativo ou status incorreto:', data.status)
+        setError('Este formulário não está disponível.'); setLoading(false); return
+      }
       setForm(data as DbForm)
       setLoading(false)
     }
