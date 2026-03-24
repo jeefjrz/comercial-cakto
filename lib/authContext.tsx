@@ -1,5 +1,5 @@
 'use client';
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { supabase } from './supabase/client';
 
 export interface User {
@@ -48,7 +48,6 @@ async function fetchProfile(authId: string, email: string): Promise<User | null>
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const initialized = useRef(false);
 
   const signIn = useCallback(async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -67,18 +66,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (initialized.current) return;
-    initialized.current = true;
+    // Timeout de segurança: garante que loading vira false em no máximo 4s
+    // mesmo se getSession ou onAuthStateChange falharem/não dispararem.
+    const safetyTimer = setTimeout(() => setLoading(false), 4000);
 
-    // getSession() resolve imediatamente do localStorage — garante que loading
-    // vira false mesmo se onAuthStateChange demorar ou não disparar.
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (session?.user) {
-        const profile = await fetchProfile(session.user.id, session.user.email!);
-        setUser(profile);
-      }
-      setLoading(false);
-    });
+    supabase.auth.getSession()
+      .then(async ({ data: { session } }) => {
+        clearTimeout(safetyTimer);
+        if (session?.user) {
+          const profile = await fetchProfile(session.user.id, session.user.email!);
+          setUser(profile);
+        }
+        setLoading(false);
+      })
+      .catch(() => {
+        clearTimeout(safetyTimer);
+        setLoading(false);
+      });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       if (session?.user) {
@@ -89,7 +93,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       setLoading(false);
     });
-    return () => subscription.unsubscribe();
+
+    return () => {
+      clearTimeout(safetyTimer);
+      subscription.unsubscribe();
+    };
   }, []);
 
   // NEVER block rendering — always return children regardless of loading state
