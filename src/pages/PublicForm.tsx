@@ -5,13 +5,14 @@ import { supabase } from '@/lib/supabase/client'
 type FormField = {
   id: number; type: string; label: string
   placeholder?: string; required: boolean; options?: string
+  width?: 'full' | 'half'
 }
 
 type DbForm = {
   id: string; name: string; color: string; background_image: string
   fields: unknown; webhook: string; active: boolean; status: string
-  bg_color: string; field_bg_color: string; bg_opacity: number; redirect_url: string
-  custom_domain: string
+  bg_color: string; field_bg_color: string; field_text_color: string; bg_opacity: number; redirect_url: string
+  logo_url: string; custom_domain: string
 }
 
 interface Props {
@@ -32,7 +33,7 @@ export default function PublicForm({ customDomain }: Props) {
     console.log('[PublicForm] Hostname atual:', hostname)
     async function load() {
       setLoading(true)
-      let query = supabase.from('forms').select('id,name,color,background_image,fields,webhook,active,status,custom_domain,bg_color,field_bg_color,bg_opacity,redirect_url')
+      let query = supabase.from('forms').select('id,name,color,background_image,fields,webhook,active,status,custom_domain,bg_color,field_bg_color,field_text_color,bg_opacity,redirect_url,logo_url')
 
       if (customDomain) {
         console.log('[PublicForm] Buscando por custom_domain:', customDomain)
@@ -124,7 +125,7 @@ export default function PublicForm({ customDomain }: Props) {
       width: '100%', boxSizing: 'border-box', padding: '12px 14px',
       background: form?.field_bg_color || 'rgba(255,255,255,0.08)',
       border: '1px solid rgba(255,255,255,0.2)',
-      borderRadius: 10, color: '#fff', fontSize: 15, outline: 'none', fontFamily: 'inherit',
+      borderRadius: 10, color: fieldTextColor, fontSize: 15, outline: 'none', fontFamily: 'inherit',
     }
 
     if (f.type === 'Textarea') return (
@@ -150,9 +151,10 @@ export default function PublicForm({ customDomain }: Props) {
     )
   }
 
-  const accentColor  = form?.color        || '#2997FF'
-  const pageBgColor  = form?.bg_color     || '#0f172a'
-  const formOpacity  = form?.bg_opacity   ?? 60   // 0=transparente, 100=sólido
+  const accentColor     = form?.color            || '#2997FF'
+  const pageBgColor     = form?.bg_color         || '#0f172a'
+  const fieldTextColor  = form?.field_text_color || '#ffffff'
+  const formOpacity     = form?.bg_opacity       ?? 60   // 0=transparente, 100=sólido
   // fundo da página: imagem (se houver) sobre a cor de fundo
   const pageStyle: React.CSSProperties = form?.background_image
     ? { backgroundImage: `url(${form.background_image})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundColor: pageBgColor }
@@ -188,11 +190,17 @@ export default function PublicForm({ customDomain }: Props) {
         {/* Header accent */}
         <div style={{ height: 4, background: accentColor, borderRadius: 99, marginBottom: 28 }} />
 
+        {form?.logo_url && (
+          <div style={{ textAlign: 'center', marginBottom: 20 }}>
+            <img src={form.logo_url} alt="logo" style={{ maxHeight: 56, maxWidth: '100%', objectFit: 'contain' }} />
+          </div>
+        )}
+
         <h1 style={{ fontSize: 26, fontWeight: 800, color: '#fff', marginBottom: 28, lineHeight: 1.2 }}>{form?.name}</h1>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
           {fields.map(f => (
-            <div key={f.id}>
+            <div key={f.id} style={{ gridColumn: f.width === 'half' ? 'span 1' : 'span 2' }}>
               <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'rgba(255,255,255,0.75)', marginBottom: 7 }}>
                 {f.label}{f.required && <span style={{ color: accentColor, marginLeft: 4 }}>*</span>}
               </label>

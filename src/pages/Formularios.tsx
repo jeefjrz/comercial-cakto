@@ -23,6 +23,7 @@ type FormField = {
   placeholder?: string;
   required: boolean;
   options?: string; // comma-separated, only for Select
+  width?: 'full' | 'half';
 };
 
 type DbForm = {
@@ -41,8 +42,10 @@ type DbForm = {
   background_image: string;
   bg_color: string;
   field_bg_color: string;
+  field_text_color: string;
   bg_opacity: number;
   redirect_url: string;
+  logo_url: string;
 };
 
 type SubView = 'list' | 'editor' | 'responses';
@@ -53,7 +56,7 @@ const EMPTY_FORM: DbForm = {
   id: '', name: 'Novo Formulário', type: 'Cadastro', slug: '', responses: 0,
   active: true, color: '#2997FF', status: 'Rascunho', fields: [], embed_code: '',
   webhook: '', custom_domain: '', background_image: '',
-  bg_color: '#0f172a', field_bg_color: '#1e293b', bg_opacity: 60, redirect_url: '',
+  bg_color: '#0f172a', field_bg_color: '#1e293b', field_text_color: '#ffffff', bg_opacity: 60, redirect_url: '', logo_url: '',
 };
 
 export default function FormulariosPage() {
@@ -121,7 +124,8 @@ function FormulariosContent() {
         fields: updated.fields, embed_code: '', webhook: updated.webhook,
         custom_domain: updated.custom_domain, background_image: updated.background_image,
         bg_color: updated.bg_color, field_bg_color: updated.field_bg_color,
-        bg_opacity: updated.bg_opacity, redirect_url: updated.redirect_url,
+        field_text_color: updated.field_text_color, bg_opacity: updated.bg_opacity,
+        redirect_url: updated.redirect_url, logo_url: updated.logo_url,
       }).select().single();
       if (error) { toast(error.message, 'error'); setIsSaving(false); return; }
       setForms(p => [data as DbForm, ...p]);
@@ -132,7 +136,8 @@ function FormulariosContent() {
         webhook: updated.webhook, color: updated.color, active: updated.active,
         custom_domain: updated.custom_domain, background_image: updated.background_image,
         bg_color: updated.bg_color, field_bg_color: updated.field_bg_color,
-        bg_opacity: updated.bg_opacity, redirect_url: updated.redirect_url,
+        field_text_color: updated.field_text_color, bg_opacity: updated.bg_opacity,
+        redirect_url: updated.redirect_url, logo_url: updated.logo_url,
       }).eq('id', updated.id);
       if (error) { toast(error.message, 'error'); setIsSaving(false); return; }
       setForms(p => p.map(f => f.id === updated.id ? { ...f, ...updated } : f));
@@ -245,6 +250,8 @@ function FormEditor({ form, onBack, onSave, isSaving }: {
   const [fieldBgColor, setFieldBgColor]     = useState(form.field_bg_color || '#1e293b');
   const [bgOpacity, setBgOpacity]           = useState(form.bg_opacity ?? 60);
   const [redirectUrl, setRedirectUrl]       = useState(form.redirect_url || '');
+  const [fieldTextColor, setFieldTextColor] = useState(form.field_text_color || '#ffffff');
+  const [logoUrl, setLogoUrl]               = useState(form.logo_url || '');
 
   // Behavior toggles — persisted in embed_code as JSON
   const parsedBehaviors = (() => { try { return JSON.parse(form.embed_code || '{}').behaviors || {} } catch { return {} } })();
@@ -269,12 +276,14 @@ function FormEditor({ form, onBack, onSave, isSaving }: {
   const [newFieldLabel, setNewFieldLabel]     = useState('');
   const [newFieldPlaceholder, setNewFieldPlaceholder] = useState('');
   const [newFieldOptions, setNewFieldOptions] = useState('');
+  const [newFieldWidth, setNewFieldWidth]     = useState<'full' | 'half'>('full');
 
   // ── Edit field state ──
   const [editingId, setEditingId]               = useState<number | null>(null);
   const [editLabel, setEditLabel]               = useState('');
   const [editPlaceholder, setEditPlaceholder]   = useState('');
   const [editOptions, setEditOptions]           = useState('');
+  const [editWidth, setEditWidth]               = useState<'full' | 'half'>('full');
 
   function addField() {
     if (!newFieldLabel) return;
@@ -283,8 +292,9 @@ function FormEditor({ form, onBack, onSave, isSaving }: {
       placeholder: newFieldPlaceholder || undefined,
       required: false,
       options: newFieldType === 'Select' ? newFieldOptions : undefined,
+      width: newFieldWidth,
     }]);
-    setNewFieldLabel(''); setNewFieldPlaceholder(''); setNewFieldOptions('');
+    setNewFieldLabel(''); setNewFieldPlaceholder(''); setNewFieldOptions(''); setNewFieldWidth('full');
     setAddingField(false);
   }
 
@@ -293,11 +303,12 @@ function FormEditor({ form, onBack, onSave, isSaving }: {
     setEditLabel(f.label);
     setEditPlaceholder(f.placeholder || '');
     setEditOptions(f.options || '');
+    setEditWidth(f.width || 'full');
   }
 
   function saveEdit() {
     setFields(p => p.map(f => f.id === editingId
-      ? { ...f, label: editLabel, placeholder: editPlaceholder || undefined, options: f.type === 'Select' ? editOptions : f.options }
+      ? { ...f, label: editLabel, placeholder: editPlaceholder || undefined, options: f.type === 'Select' ? editOptions : f.options, width: editWidth }
       : f
     ));
     setEditingId(null);
@@ -310,7 +321,8 @@ function FormEditor({ form, onBack, onSave, isSaving }: {
     return {
       ...form, name, status, fields: fields as unknown as Json,
       webhook, color, custom_domain: customDomain, background_image: backgroundImage,
-      bg_color: bgColor, field_bg_color: fieldBgColor, bg_opacity: bgOpacity, redirect_url: redirectUrl,
+      bg_color: bgColor, field_bg_color: fieldBgColor, field_text_color: fieldTextColor,
+      bg_opacity: bgOpacity, redirect_url: redirectUrl, logo_url: logoUrl,
     };
   }
 
@@ -343,7 +355,7 @@ function FormEditor({ form, onBack, onSave, isSaving }: {
                   </Field>
 
                   {/* Cores lado a lado */}
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                     <Field label="Cor Primária / Botão">
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <input type="color" value={color} onChange={e => setColor(e.target.value)}
@@ -351,7 +363,7 @@ function FormEditor({ form, onBack, onSave, isSaving }: {
                         <span style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'monospace' }}>{color}</span>
                       </div>
                     </Field>
-                    <Field label="Cor de Fundo">
+                    <Field label="Cor de Fundo da Página">
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <input type="color" value={bgColor} onChange={e => setBgColor(e.target.value)}
                           style={{ width: 36, height: 36, padding: 2, border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer', background: 'none' }} />
@@ -365,7 +377,27 @@ function FormEditor({ form, onBack, onSave, isSaving }: {
                         <span style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'monospace' }}>{fieldBgColor}</span>
                       </div>
                     </Field>
+                    <Field label="Cor do Texto dos Campos">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <input type="color" value={fieldTextColor} onChange={e => setFieldTextColor(e.target.value)}
+                          style={{ width: 36, height: 36, padding: 2, border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer', background: 'none' }} />
+                        <span style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'monospace' }}>{fieldTextColor}</span>
+                      </div>
+                    </Field>
                   </div>
+
+                  <Field label="URL da Logo (Topo)">
+                    <div style={{ position: 'relative' }}>
+                      <input className="inp" value={logoUrl} onChange={e => setLogoUrl(e.target.value)}
+                        placeholder="https://..." style={{ paddingLeft: 38 }} />
+                      <div style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)' }}>
+                        <Image size={15} color="var(--text2)" />
+                      </div>
+                    </div>
+                    <p style={{ fontSize: 11, color: 'var(--text2)', marginTop: 4 }}>
+                      Exibida centralizada no topo do formulário público.
+                    </p>
+                  </Field>
 
                   <Field label="Imagem de Fundo (URL)">
                     <div style={{ position: 'relative' }}>
@@ -404,6 +436,7 @@ function FormEditor({ form, onBack, onSave, isSaving }: {
                     padding: 20,
                     background: `rgba(0,0,0,${(100 - bgOpacity) / 100})`,
                   }}>
+                    {logoUrl && <div style={{ textAlign: 'center', marginBottom: 10 }}><img src={logoUrl} alt="logo" style={{ maxHeight: 40, maxWidth: '100%', objectFit: 'contain' }} /></div>}
                     <div style={{ fontWeight: 700, fontSize: 14, color: '#fff', marginBottom: 12 }}>{name}</div>
                     {fields.slice(0, 2).map(f => (
                       <div key={f.id} style={{ marginBottom: 10 }}>
@@ -452,6 +485,16 @@ function FormEditor({ form, onBack, onSave, isSaving }: {
                                 <input className="inp" value={editOptions} onChange={e => setEditOptions(e.target.value)} placeholder="Opção 1, Opção 2, Opção 3" />
                               </Field>
                             )}
+                            <Field label="Largura do Campo">
+                              <div style={{ display: 'flex', gap: 8 }}>
+                                {(['full', 'half'] as const).map(w => (
+                                  <button key={w} onClick={() => setEditWidth(w)} type="button"
+                                    style={{ flex: 1, padding: '8px 0', borderRadius: 8, border: `1px solid ${editWidth === w ? 'var(--action)' : 'var(--border)'}`, background: editWidth === w ? 'color-mix(in srgb, var(--action) 15%, transparent)' : 'var(--bg-card2)', color: editWidth === w ? 'var(--action)' : 'var(--text2)', fontWeight: 600, fontSize: 12, cursor: 'pointer' }}>
+                                    {w === 'full' ? 'Largura Total' : 'Metade'}
+                                  </button>
+                                ))}
+                              </div>
+                            </Field>
                             <div style={{ display: 'flex', gap: 8 }}>
                               <Button size="sm" onClick={saveEdit}>Salvar</Button>
                               <Button size="sm" variant="ghost" onClick={() => setEditingId(null)}>Cancelar</Button>
@@ -465,7 +508,7 @@ function FormEditor({ form, onBack, onSave, isSaving }: {
                           <div style={{ flex: 1 }}>
                             <div style={{ fontWeight: 600, fontSize: 13 }}>{f.label}</div>
                             <div style={{ fontSize: 11, color: 'var(--text2)' }}>
-                              {f.type}{f.required ? ' · Obrigatório' : ''}{f.type === 'Select' && f.options ? ` · ${f.options.split(',').length} opções` : ''}
+                              {f.type}{f.required ? ' · Obrigatório' : ''}{f.type === 'Select' && f.options ? ` · ${f.options.split(',').length} opções` : ''}{f.width === 'half' ? ' · Metade' : ' · Largura Total'}
                             </div>
                           </div>
                           <Toggle value={f.required} onChange={() => toggleRequired(f.id)} />
@@ -502,9 +545,19 @@ function FormEditor({ form, onBack, onSave, isSaving }: {
                         <input className="inp" value={newFieldOptions} onChange={e => setNewFieldOptions(e.target.value)} placeholder="Opção 1, Opção 2, Opção 3" />
                       </Field>
                     )}
+                    <Field label="Largura do Campo">
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        {(['full', 'half'] as const).map(w => (
+                          <button key={w} onClick={() => setNewFieldWidth(w)} type="button"
+                            style={{ flex: 1, padding: '8px 0', borderRadius: 8, border: `1px solid ${newFieldWidth === w ? 'var(--action)' : 'var(--border)'}`, background: newFieldWidth === w ? 'color-mix(in srgb, var(--action) 15%, transparent)' : 'var(--bg-card2)', color: newFieldWidth === w ? 'var(--action)' : 'var(--text2)', fontWeight: 600, fontSize: 12, cursor: 'pointer' }}>
+                            {w === 'full' ? 'Largura Total' : 'Metade'}
+                          </button>
+                        ))}
+                      </div>
+                    </Field>
                     <div style={{ display: 'flex', gap: 8 }}>
                       <Button onClick={addField}>Adicionar Campo</Button>
-                      <Button variant="ghost" onClick={() => { setAddingField(false); setNewFieldLabel(''); setNewFieldOptions(''); }}>Cancelar</Button>
+                      <Button variant="ghost" onClick={() => { setAddingField(false); setNewFieldLabel(''); setNewFieldOptions(''); setNewFieldWidth('full'); }}>Cancelar</Button>
                     </div>
                   </div>
                 </div>

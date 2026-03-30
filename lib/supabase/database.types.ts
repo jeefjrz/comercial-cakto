@@ -75,22 +75,22 @@ export interface Database {
           id: string; name: string; type: FormType; slug: string; responses: number
           active: boolean; color: string; status: FormStatus; fields: Json
           embed_code: string; webhook: string; custom_domain: string; background_image: string
-          bg_color: string; field_bg_color: string; bg_opacity: number; redirect_url: string
-          created_at: string; updated_at: string
+          bg_color: string; field_bg_color: string; field_text_color: string; bg_opacity: number; redirect_url: string
+          logo_url: string; created_at: string; updated_at: string
         }
         Insert: {
           id?: string; name: string; type: FormType; slug: string; responses?: number
           active?: boolean; color?: string; status?: FormStatus; fields?: Json
           embed_code?: string; webhook?: string; custom_domain?: string; background_image?: string
-          bg_color?: string; field_bg_color?: string; bg_opacity?: number; redirect_url?: string
-          created_at?: string; updated_at?: string
+          bg_color?: string; field_bg_color?: string; field_text_color?: string; bg_opacity?: number; redirect_url?: string
+          logo_url?: string; created_at?: string; updated_at?: string
         }
         Update: {
           id?: string; name?: string; type?: FormType; slug?: string; responses?: number
           active?: boolean; color?: string; status?: FormStatus; fields?: Json
           embed_code?: string; webhook?: string; custom_domain?: string; background_image?: string
-          bg_color?: string; field_bg_color?: string; bg_opacity?: number; redirect_url?: string
-          updated_at?: string
+          bg_color?: string; field_bg_color?: string; field_text_color?: string; bg_opacity?: number; redirect_url?: string
+          logo_url?: string; updated_at?: string
         }
         Relationships: []
       }
