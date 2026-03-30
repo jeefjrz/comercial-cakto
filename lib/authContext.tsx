@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import type { User as SupabaseAuthUser } from '@supabase/supabase-js';
 import { supabase } from './supabase/client';
 
 export interface User {
@@ -28,43 +29,63 @@ const AuthCtx = createContext<AuthCtxValue>({
   logout: async () => { },
 });
 
-// Busca o perfil real do usuário em public.users.
-// Estratégia: tenta por email (chave única), depois por id (se o id = auth.uid()).
-async function fetchProfile(authId: string, email: string): Promise<User> {
-  // 1. Tenta pela coluna email (mais confiável — não depende de UUID matching)
-  const { data: byEmail } = await supabase
-    .from('users')
-    .select('id,name,email,role,team_id,active')
-    .eq('email', email)
-    .maybeSingle();
+// Busca o perfil real em public.users.
+// NÃO chama supabase.auth.getUser() — isso causaria deadlock dentro do onAuthStateChange.
+// Usa o authUser (já disponível no evento) para o fallback de metadados.
+async function fetchProfile(authUser: SupabaseAuthUser): Promise<User> {
+  const email  = authUser.email ?? '';
+  const authId = authUser.id;
 
-  if (byEmail) return byEmail as User;
+  console.log('[fetchProfile] Buscando perfil para:', email);
 
-  // 2. Tenta pelo id = auth.uid() (caso o perfil tenha sido criado com esse UUID)
-  const { data: byId } = await supabase
-    .from('users')
-    .select('id,name,email,role,team_id,active')
-    .eq('id', authId)
-    .maybeSingle();
+  try {
+    // 1. Tenta por email (chave única — independe de UUID matching)
+    const { data: byEmail, error: e1 } = await supabase
+      .from('users')
+      .select('id,name,email,role,team_id,active')
+      .eq('email', email)
+      .maybeSingle();
 
-  if (byId) return byId as User;
+    if (byEmail) {
+      console.log('[fetchProfile] Perfil encontrado por email. role:', byEmail.role);
+      return byEmail as User;
+    }
+    if (e1) console.warn('[fetchProfile] Erro na query por email:', e1.message);
 
-  // 3. Fallback: lê a role do raw_user_meta_data do Supabase Auth
-  const { data: { user: authUser } } = await supabase.auth.getUser();
-  const metaRole = authUser?.user_metadata?.role;
+    // 2. Tenta por id = auth.uid()
+    const { data: byId, error: e2 } = await supabase
+      .from('users')
+      .select('id,name,email,role,team_id,active')
+      .eq('id', authId)
+      .maybeSingle();
+
+    if (byId) {
+      console.log('[fetchProfile] Perfil encontrado por id. role:', byId.role);
+      return byId as User;
+    }
+    if (e2) console.warn('[fetchProfile] Erro na query por id:', e2.message);
+
+  } catch (err) {
+    console.warn('[fetchProfile] Exceção nas queries:', err);
+  }
+
+  // 3. Fallback: usa metadados do auth.users (sem chamada extra de rede)
+  const meta     = authUser.user_metadata ?? {};
+  const metaRole = typeof meta.role === 'string' ? meta.role : 'SDR';
+  console.warn('[fetchProfile] Perfil não encontrado no banco. Usando fallback. role:', metaRole);
 
   return {
-    id: authId,
-    name: authUser?.user_metadata?.full_name ?? email.split('@')[0],
+    id:       authId,
+    name:     meta.full_name ?? email.split('@')[0],
     email,
-    role: typeof metaRole === 'string' ? metaRole : 'SDR',
-    active: true,
-    team_id: null,
+    role:     metaRole,
+    active:   true,
+    team_id:  null,
   };
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser]       = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
   const signIn = useCallback(async (email: string, password: string) => {
@@ -73,8 +94,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (error) return { data: null, error: error.message };
       return { data, error: null };
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Erro desconhecido';
-      return { data: null, error: msg };
+      return { data: null, error: err instanceof Error ? err.message : 'Erro desconhecido' };
     }
   }, []);
 
@@ -95,40 +115,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let mounted = true;
 
-    const fetchSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) {
-        const profile = await fetchProfile(session.user.id, session.user.email!);
-        if (mounted) {
-          console.log('[AuthContext] Liberando acesso!');
-          setUser(profile);
-          setLoading(false);
+    // Usa APENAS onAuthStateChange — ele dispara INITIAL_SESSION imediatamente
+    // na subscrição, eliminando a necessidade de um fetchSession separado
+    // (que causava race condition e chamadas duplicadas ao banco).
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        console.log('[AuthContext] onAuthStateChange:', event, '| user:', session?.user?.email ?? 'null');
+
+        if (session?.user) {
+          try {
+            const profile = await fetchProfile(session.user);
+            if (mounted) {
+              console.log('[AuthContext] Perfil carregado. role:', profile.role);
+              setUser(profile);
+            }
+          } catch (err) {
+            console.error('[AuthContext] Erro ao carregar perfil:', err);
+            if (mounted) setUser(null);
+          }
+        } else {
+          if (mounted) setUser(null);
         }
-      } else {
+
+        // Garante que loading é removido independente de sucesso ou falha
         if (mounted) {
-          setUser(null);
           setLoading(false);
+          console.log('[AuthContext] loading = false');
         }
       }
-    };
-
-    fetchSession();
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      if (session?.user) {
-        const profile = await fetchProfile(session.user.id, session.user.email!);
-        if (mounted) {
-          console.log('[AuthContext] Liberando acesso após mudança!');
-          setUser(profile);
-          setLoading(false);
-        }
-      } else {
-        if (mounted) {
-          setUser(null);
-          setLoading(false);
-        }
-      }
-    });
+    );
 
     return () => {
       mounted = false;

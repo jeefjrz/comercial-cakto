@@ -22,7 +22,18 @@ const MAIN_DOMAINS = [
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
-  if (loading) return null
+  if (loading) return (
+    <div style={{
+      minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: '#000', color: '#98989D', fontSize: 14, gap: 10,
+    }}>
+      <span style={{ display: 'inline-block', width: 18, height: 18, borderRadius: '50%',
+        border: '2px solid #333', borderTopColor: '#2997FF',
+        animation: 'spin .8s linear infinite' }} />
+      Carregando...
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+    </div>
+  )
   if (!user) return <Navigate to="/login" replace />
   return <>{children}</>
 }
