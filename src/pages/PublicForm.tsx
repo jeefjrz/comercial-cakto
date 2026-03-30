@@ -45,14 +45,26 @@ export default function PublicForm({ customDomain }: Props) {
       }
 
       const { data, error: err } = await query.maybeSingle()
-      console.log('[PublicForm] Resultado Supabase:', { data, err })
-      if (err || !data) { setError('Formulário não encontrado.'); setLoading(false); return }
-      if (customDomain && data.custom_domain !== customDomain) {
-        console.log('[PublicForm] custom_domain não bate:', data.custom_domain, '!=', customDomain)
+
+      // Logs detalhados para diagnóstico
+      if (err) {
+        console.error('[PublicForm] Erro Supabase (pode ser RLS bloqueando anon):', err.message, err.code)
         setError('Formulário não encontrado.'); setLoading(false); return
       }
+      if (!data) {
+        console.error('[PublicForm] Query retornou null — verifique: (1) o ID/slug está correto, (2) a policy RLS de SELECT para anon na tabela forms existe, (3) o status é "Publicado" e active=true.')
+        setError('Formulário não encontrado.'); setLoading(false); return
+      }
+
+      console.log('[PublicForm] Form encontrado:', { id: data.id, status: data.status, active: data.active })
+
+      if (customDomain && data.custom_domain !== customDomain) {
+        console.error('[PublicForm] custom_domain não bate:', data.custom_domain, '!=', customDomain)
+        setError('Formulário não encontrado.'); setLoading(false); return
+      }
+      // Aceita qualquer capitalização: 'Publicado', 'publicado', 'PUBLICADO'
       if (!data.active || data.status?.toLowerCase() !== 'publicado') {
-        console.log('[PublicForm] Formulário inativo ou status incorreto:', data.status)
+        console.error('[PublicForm] Formulário não publicado. status:', data.status, '| active:', data.active)
         setError('Este formulário não está disponível.'); setLoading(false); return
       }
       setForm(data as DbForm)

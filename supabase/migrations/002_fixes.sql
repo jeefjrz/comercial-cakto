@@ -214,4 +214,31 @@ CREATE TRIGGER on_auth_user_created
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
 
+-- ── FIX FORMULÁRIO PÚBLICO: RLS para anon ────────────────────────────────
+-- Sem esta policy, visitantes não autenticados recebem data=null silenciosamente
+-- e o frontend exibe "Formulário não encontrado" mesmo o form existindo.
+
+DO $$
+BEGIN
+  -- Leitura pública: apenas forms ativos e publicados (seguro — não expõe rascunhos)
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE tablename = 'forms' AND policyname = 'Anon pode ler formularios publicados'
+  ) THEN
+    CREATE POLICY "Anon pode ler formularios publicados" ON public.forms
+      FOR SELECT TO anon
+      USING (active = true AND status = 'Publicado');
+  END IF;
+
+  -- Autenticados continuam com acesso total (já existia, garantindo idempotência)
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE tablename = 'forms' AND policyname = 'Allow all for authenticated'
+  ) THEN
+    CREATE POLICY "Allow all for authenticated" ON public.forms
+      FOR ALL TO authenticated USING (true) WITH CHECK (true);
+  END IF;
+END $$;
+
+
 -- ── FIM ───────────────────────────────────────────────────────────────────
