@@ -129,6 +129,16 @@ function FormulariosContent() {
       setForms(p => p.map(f => f.id === updated.id ? { ...f, ...updated } : f));
     }
     setIsSaving(false);
+
+    // Dispara webhook quando o formulário é publicado e tem URL configurada
+    if (updated.status === 'Publicado' && updated.webhook) {
+      fetch(updated.webhook, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ event: 'form.published', formId: updated.id || 'new', formName: updated.name }),
+      }).catch(() => { /* webhook failure is non-blocking */ });
+    }
+
     setView('list');
     toast('Formulário salvo!', 'success');
   }
@@ -184,7 +194,7 @@ function FormulariosContent() {
                 <Button size="sm" icon={Pencil} onClick={() => openEditor(f)}>Editar</Button>
                 <Button size="sm" variant="secondary" icon={Eye} onClick={() => openResponses(f)}>Respostas</Button>
                 <Button size="sm" variant="ghost" icon={Copy} onClick={() => {
-                  navigator.clipboard.writeText(`<iframe src="https://forms.cakto.com.br/${f.id}" width="100%" height="600" />`);
+                  navigator.clipboard.writeText(`<iframe src="${window.location.origin}/f/${f.id}" width="100%" height="600" />`);
                   toast('Embed copiado!', 'success');
                 }}>Embed</Button>
                 <Button size="sm" variant="destructive" icon={Trash2} onClick={() => setDeleteModal(f.id)} />
@@ -502,9 +512,9 @@ function FormEditor({ form, onBack, onSave, isSaving }: {
                   <div style={{ fontWeight: 700, fontSize: 14 }}>Embed</div>
                 </div>
                 <div style={{ background: 'var(--bg-card2)', borderRadius: 8, padding: 12, fontFamily: 'monospace', fontSize: 12, color: 'var(--text2)', wordBreak: 'break-all', marginBottom: 12 }}>
-                  {`<iframe src="https://forms.cakto.com.br/${form.id || '[id após salvar]'}" width="100%" height="600" />`}
+                  {`<iframe src="${window.location.origin}/f/${form.id || '[id após salvar]'}" width="100%" height="600" />`}
                 </div>
-                <Button variant="secondary" icon={Copy} onClick={() => navigator.clipboard.writeText(`<iframe src="https://forms.cakto.com.br/${form.id}" />`)}>
+                <Button variant="secondary" icon={Copy} onClick={() => navigator.clipboard.writeText(`<iframe src="${window.location.origin}/f/${form.id}" />`)}>
                   Copiar Embed
                 </Button>
               </div>

@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { ChevronLeft, ChevronRight, Plus, Phone, Calendar, CheckCircle, XCircle, Clock, Loader2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Phone, Calendar, CheckCircle, XCircle, Clock, Loader2, ExternalLink } from 'lucide-react';
 import { useAuth } from '@/lib/authContext';
 import { Header } from '@/components/Header';
 import { Button } from '@/components/ui/Button';
@@ -49,6 +49,7 @@ export default function AgendaPage() {
 }
 
 function AgendaContent() {
+  const { user } = useAuth();
   const toast = useToast();
   const today = new Date();
   const [year, setYear]   = useState(today.getFullYear());
@@ -147,6 +148,21 @@ function AgendaContent() {
       const newCall: CallItem = { id: (data as { id: string }).id, title: form.title, date: form.date, time: form.time, responsibleId: form.responsibleId, responsible: responsibleName, status: form.status, notes: form.notes };
       setCalls(p => [newCall, ...p]);
       toast('Call agendada!', 'success');
+
+      // Sincroniza com o Google Calendar Mestre via Service Account
+      supabase.functions.invoke('schedule-call', {
+        body: {
+          title: form.title,
+          date: form.date,
+          time: form.time || '09:00',
+          closerName: user?.name || responsibleName,
+          closerEmail: user?.email || '',
+          notes: form.notes,
+        },
+      }).then(({ error: fnErr }) => {
+        if (fnErr) toast('Call salva, mas falhou no Google Calendar', 'error');
+        else toast('Sincronizado com Google Calendar ✓', 'success');
+      });
     }
     setModal(false);
   }
@@ -247,11 +263,17 @@ function AgendaContent() {
 
             <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 20 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-                <Calendar size={18} color="var(--action)" />
+                <Calendar size={18} color="var(--green)" />
                 <div style={{ fontWeight: 700, fontSize: 14 }}>Google Calendar</div>
               </div>
-              <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 12 }}>Sincronize suas calls com o Google Calendar automaticamente.</div>
-              <Button variant="secondary" style={{ width: '100%' }}>Conectar Conta</Button>
+              <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 12, lineHeight: 1.5 }}>
+                Calendário Mestre ativo via Service Account.<br />
+                Todos os closers sincronizam automaticamente ao agendar.
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--green)', fontWeight: 600 }}>
+                <ExternalLink size={13} />
+                Calendário compartilhado configurado
+              </div>
             </div>
           </div>
         </div>

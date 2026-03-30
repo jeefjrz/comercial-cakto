@@ -66,7 +66,7 @@ export default function DashboardsPage() {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
   
-  useEffect(() => { if (!loading && !user) navigate('/login'); }, [user, loading, router]);
+  useEffect(() => { if (!loading && !user) navigate('/login'); }, [user, loading, navigate]);
   if (loading || !user) return null;
   return <DashboardsContent />;
 }
