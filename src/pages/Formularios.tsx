@@ -112,7 +112,7 @@ function FormulariosContent() {
     if (!updated.id) {
       const { data, error } = await supabase.from('forms').insert({
         name: updated.name, type: updated.type, slug, responses: 0,
-        active: updated.active, color: updated.color, status: updated.status.toLowerCase() as FormStatus,
+        active: updated.active, color: updated.color, status: updated.status as FormStatus,
         fields: updated.fields, embed_code: '', webhook: updated.webhook,
         custom_domain: updated.custom_domain, background_image: updated.background_image,
       }).select().single();
@@ -121,7 +121,7 @@ function FormulariosContent() {
       if (user) logAudit(user.id, user.name, `Criou formulário: ${updated.name}`, 'Formulários');
     } else {
       const { error } = await supabase.from('forms').update({
-        name: updated.name, status: updated.status.toLowerCase() as FormStatus, fields: updated.fields,
+        name: updated.name, status: updated.status as FormStatus, fields: updated.fields,
         webhook: updated.webhook, color: updated.color, active: updated.active,
         custom_domain: updated.custom_domain, background_image: updated.background_image,
       }).eq('id', updated.id);
