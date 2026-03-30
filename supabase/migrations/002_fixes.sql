@@ -170,4 +170,48 @@ CREATE TRIGGER trg_deduzir_estoque
   EXECUTE FUNCTION deduzir_estoque();
 
 
+-- ── TAREFA ROLE: RLS — usuário lê seu próprio perfil ─────────────────────
+-- Permite que o usuário autenticado leia sua própria linha em public.users.
+-- Funciona quando users.id = auth.uid() (padrão Supabase com trigger de signup).
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE tablename = 'users' AND policyname = 'User can read own profile'
+  ) THEN
+    CREATE POLICY "User can read own profile" ON public.users
+      FOR SELECT USING (auth.uid() = id);
+  END IF;
+END $$;
+
+-- Trigger: cria a linha em public.users automaticamente ao fazer signUp,
+-- garantindo que novos usuários sempre tenham um perfil com role correto.
+
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER SET search_path = public
+AS $$
+BEGIN
+  INSERT INTO public.users (id, name, email, role, active)
+  VALUES (
+    NEW.id,
+    COALESCE(NEW.raw_user_meta_data->>'full_name', split_part(NEW.email, '@', 1)),
+    NEW.email,
+    COALESCE(NEW.raw_user_meta_data->>'role', 'SDR'),
+    true
+  )
+  ON CONFLICT (id) DO NOTHING;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+
 -- ── FIM ───────────────────────────────────────────────────────────────────

@@ -28,19 +28,36 @@ const AuthCtx = createContext<AuthCtxValue>({
   logout: async () => { },
 });
 
-// ==========================================
-// FUNÇÃO MODO "TRATOR": IGNORA O BANCO E ENTRA
-// ==========================================
+// Busca o perfil real do usuário em public.users.
+// Estratégia: tenta por email (chave única), depois por id (se o id = auth.uid()).
 async function fetchProfile(authId: string, email: string): Promise<User> {
-  console.log('[AuthContext] Ignorando o banco e forçando a entrada para:', email);
+  // 1. Tenta pela coluna email (mais confiável — não depende de UUID matching)
+  const { data: byEmail } = await supabase
+    .from('users')
+    .select('id,name,email,role,team_id,active')
+    .eq('email', email)
+    .maybeSingle();
 
-  // Retorna um usuário falso instantaneamente, sem tentar falar com a tabela 'users'
-  // Isso evita que o código congele esperando uma resposta do banco.
+  if (byEmail) return byEmail as User;
+
+  // 2. Tenta pelo id = auth.uid() (caso o perfil tenha sido criado com esse UUID)
+  const { data: byId } = await supabase
+    .from('users')
+    .select('id,name,email,role,team_id,active')
+    .eq('id', authId)
+    .maybeSingle();
+
+  if (byId) return byId as User;
+
+  // 3. Fallback: lê a role do raw_user_meta_data do Supabase Auth
+  const { data: { user: authUser } } = await supabase.auth.getUser();
+  const metaRole = authUser?.user_metadata?.role;
+
   return {
     id: authId,
-    name: email.split('@')[0],
+    name: authUser?.user_metadata?.full_name ?? email.split('@')[0],
     email,
-    role: 'SDR', // Cargo provisório para deixar entrar
+    role: typeof metaRole === 'string' ? metaRole : 'SDR',
     active: true,
     team_id: null,
   };
