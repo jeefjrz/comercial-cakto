@@ -10,6 +10,8 @@ type FormField = {
 type DbForm = {
   id: string; name: string; color: string; background_image: string
   fields: unknown; webhook: string; active: boolean; status: string
+  bg_color: string; field_bg_color: string; bg_opacity: number; redirect_url: string
+  custom_domain: string
 }
 
 interface Props {
@@ -30,7 +32,7 @@ export default function PublicForm({ customDomain }: Props) {
     console.log('[PublicForm] Hostname atual:', hostname)
     async function load() {
       setLoading(true)
-      let query = supabase.from('forms').select('id,name,color,background_image,fields,webhook,active,status,custom_domain')
+      let query = supabase.from('forms').select('id,name,color,background_image,fields,webhook,active,status,custom_domain,bg_color,field_bg_color,bg_opacity,redirect_url')
 
       if (customDomain) {
         console.log('[PublicForm] Buscando por custom_domain:', customDomain)
@@ -107,14 +109,21 @@ export default function PublicForm({ customDomain }: Props) {
     }
 
     setSubmitting(false)
-    setSubmitted(true)
+
+    // Redireciona se configurado, senão exibe tela de sucesso
+    if (form.redirect_url) {
+      window.location.href = form.redirect_url
+    } else {
+      setSubmitted(true)
+    }
   }
 
   function renderField(f: FormField) {
     const id = String(f.id)
     const base: React.CSSProperties = {
       width: '100%', boxSizing: 'border-box', padding: '12px 14px',
-      background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.2)',
+      background: form?.field_bg_color || 'rgba(255,255,255,0.08)',
+      border: '1px solid rgba(255,255,255,0.2)',
       borderRadius: 10, color: '#fff', fontSize: 15, outline: 'none', fontFamily: 'inherit',
     }
 
@@ -141,10 +150,15 @@ export default function PublicForm({ customDomain }: Props) {
     )
   }
 
-  const accentColor = form?.color || '#2997FF'
-  const bg = form?.background_image
-    ? `url(${form.background_image}) center/cover no-repeat`
-    : `linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%)`
+  const accentColor  = form?.color        || '#2997FF'
+  const pageBgColor  = form?.bg_color     || '#0f172a'
+  const formOpacity  = form?.bg_opacity   ?? 60   // 0=transparente, 100=sólido
+  // fundo da página: imagem (se houver) sobre a cor de fundo
+  const pageStyle: React.CSSProperties = form?.background_image
+    ? { backgroundImage: `url(${form.background_image})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundColor: pageBgColor }
+    : { background: pageBgColor }
+  // fundo do container do form: sólido ou translúcido dependendo da opacidade
+  const formContainerBg = `rgba(0,0,0,${(100 - formOpacity) / 100 * 0.9})`
 
   if (loading) return (
     <div style={{ minHeight: '100vh', background: '#0f172a', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -161,7 +175,7 @@ export default function PublicForm({ customDomain }: Props) {
   )
 
   if (submitted) return (
-    <div style={{ minHeight: '100vh', background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16, padding: 24 }}>
+    <div style={{ minHeight: '100vh', ...pageStyle, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16, padding: 24 }}>
       <div style={{ width: 72, height: 72, borderRadius: '50%', background: `${accentColor}22`, border: `2px solid ${accentColor}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 36 }}>✓</div>
       <h2 style={{ fontSize: 26, fontWeight: 800, color: '#fff', textAlign: 'center' }}>Enviado com sucesso!</h2>
       <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: 15, textAlign: 'center' }}>Obrigado pela sua resposta.</p>
@@ -169,8 +183,8 @@ export default function PublicForm({ customDomain }: Props) {
   )
 
   return (
-    <div style={{ minHeight: '100vh', background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 20px', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
-      <form onSubmit={handleSubmit} style={{ width: '100%', maxWidth: 560, background: 'rgba(255,255,255,0.06)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 20, padding: '40px 36px', boxShadow: '0 24px 80px rgba(0,0,0,0.5)' }}>
+    <div style={{ minHeight: '100vh', ...pageStyle, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 20px', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+      <form onSubmit={handleSubmit} style={{ width: '100%', maxWidth: 560, background: formContainerBg, backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 20, padding: '40px 36px', boxShadow: '0 24px 80px rgba(0,0,0,0.5)' }}>
         {/* Header accent */}
         <div style={{ height: 4, background: accentColor, borderRadius: 99, marginBottom: 28 }} />
 

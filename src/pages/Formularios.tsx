@@ -39,6 +39,10 @@ type DbForm = {
   webhook: string;
   custom_domain: string;
   background_image: string;
+  bg_color: string;
+  field_bg_color: string;
+  bg_opacity: number;
+  redirect_url: string;
 };
 
 type SubView = 'list' | 'editor' | 'responses';
@@ -49,6 +53,7 @@ const EMPTY_FORM: DbForm = {
   id: '', name: 'Novo Formulário', type: 'Cadastro', slug: '', responses: 0,
   active: true, color: '#2997FF', status: 'Rascunho', fields: [], embed_code: '',
   webhook: '', custom_domain: '', background_image: '',
+  bg_color: '#0f172a', field_bg_color: '#1e293b', bg_opacity: 60, redirect_url: '',
 };
 
 export default function FormulariosPage() {
@@ -115,6 +120,8 @@ function FormulariosContent() {
         active: updated.active, color: updated.color, status: updated.status as FormStatus,
         fields: updated.fields, embed_code: '', webhook: updated.webhook,
         custom_domain: updated.custom_domain, background_image: updated.background_image,
+        bg_color: updated.bg_color, field_bg_color: updated.field_bg_color,
+        bg_opacity: updated.bg_opacity, redirect_url: updated.redirect_url,
       }).select().single();
       if (error) { toast(error.message, 'error'); setIsSaving(false); return; }
       setForms(p => [data as DbForm, ...p]);
@@ -124,6 +131,8 @@ function FormulariosContent() {
         name: updated.name, status: updated.status as FormStatus, fields: updated.fields,
         webhook: updated.webhook, color: updated.color, active: updated.active,
         custom_domain: updated.custom_domain, background_image: updated.background_image,
+        bg_color: updated.bg_color, field_bg_color: updated.field_bg_color,
+        bg_opacity: updated.bg_opacity, redirect_url: updated.redirect_url,
       }).eq('id', updated.id);
       if (error) { toast(error.message, 'error'); setIsSaving(false); return; }
       setForms(p => p.map(f => f.id === updated.id ? { ...f, ...updated } : f));
@@ -232,6 +241,10 @@ function FormEditor({ form, onBack, onSave, isSaving }: {
   const [webhook, setWebhook]       = useState(form.webhook || '');
   const [customDomain, setCustomDomain]     = useState(form.custom_domain || '');
   const [backgroundImage, setBackgroundImage] = useState(form.background_image || '');
+  const [bgColor, setBgColor]               = useState(form.bg_color || '#0f172a');
+  const [fieldBgColor, setFieldBgColor]     = useState(form.field_bg_color || '#1e293b');
+  const [bgOpacity, setBgOpacity]           = useState(form.bg_opacity ?? 60);
+  const [redirectUrl, setRedirectUrl]       = useState(form.redirect_url || '');
 
   // Behavior toggles — persisted in embed_code as JSON
   const parsedBehaviors = (() => { try { return JSON.parse(form.embed_code || '{}').behaviors || {} } catch { return {} } })();
@@ -294,7 +307,11 @@ function FormEditor({ form, onBack, onSave, isSaving }: {
   function toggleRequired(id: number) { setFields(p => p.map(f => f.id === id ? { ...f, required: !f.required } : f)); }
 
   function buildForm(): DbForm {
-    return { ...form, name, status, fields: fields as unknown as Json, webhook, color, custom_domain: customDomain, background_image: backgroundImage };
+    return {
+      ...form, name, status, fields: fields as unknown as Json,
+      webhook, color, custom_domain: customDomain, background_image: backgroundImage,
+      bg_color: bgColor, field_bg_color: fieldBgColor, bg_opacity: bgOpacity, redirect_url: redirectUrl,
+    };
   }
 
   return (
@@ -317,16 +334,39 @@ function FormEditor({ form, onBack, onSave, isSaving }: {
           {/* ── Design ── */}
           {tab === 'Design' && (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+              {/* Painel de controles */}
               <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 24 }}>
-                <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 16 }}>Aparência</div>
+                <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 16 }}>Cores & Visual</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                   <Field label="Título do Formulário">
                     <input className="inp" value={name} onChange={e => setName(e.target.value)} />
                   </Field>
-                  <Field label="Cor de Destaque">
-                    <input className="inp" type="color" value={color} onChange={e => setColor(e.target.value)}
-                      style={{ height: 40, padding: '4px 8px', cursor: 'pointer' }} />
-                  </Field>
+
+                  {/* Cores lado a lado */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+                    <Field label="Cor Primária / Botão">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <input type="color" value={color} onChange={e => setColor(e.target.value)}
+                          style={{ width: 36, height: 36, padding: 2, border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer', background: 'none' }} />
+                        <span style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'monospace' }}>{color}</span>
+                      </div>
+                    </Field>
+                    <Field label="Cor de Fundo">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <input type="color" value={bgColor} onChange={e => setBgColor(e.target.value)}
+                          style={{ width: 36, height: 36, padding: 2, border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer', background: 'none' }} />
+                        <span style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'monospace' }}>{bgColor}</span>
+                      </div>
+                    </Field>
+                    <Field label="Fundo dos Campos">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <input type="color" value={fieldBgColor} onChange={e => setFieldBgColor(e.target.value)}
+                          style={{ width: 36, height: 36, padding: 2, border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer', background: 'none' }} />
+                        <span style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'monospace' }}>{fieldBgColor}</span>
+                      </div>
+                    </Field>
+                  </div>
+
                   <Field label="Imagem de Fundo (URL)">
                     <div style={{ position: 'relative' }}>
                       <input className="inp" value={backgroundImage} onChange={e => setBackgroundImage(e.target.value)}
@@ -336,27 +376,44 @@ function FormEditor({ form, onBack, onSave, isSaving }: {
                       </div>
                     </div>
                   </Field>
+
+                  <Field label={`Opacidade do Container do Form — ${bgOpacity}%`}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <input type="range" min={0} max={100} value={bgOpacity}
+                        onChange={e => setBgOpacity(Number(e.target.value))}
+                        style={{ flex: 1, accentColor: color }} />
+                      <span style={{ fontSize: 12, fontWeight: 700, minWidth: 36, textAlign: 'right' }}>{bgOpacity}%</span>
+                    </div>
+                    <p style={{ fontSize: 11, color: 'var(--text2)', marginTop: 4 }}>
+                      0% = totalmente transparente · 100% = sólido
+                    </p>
+                  </Field>
                 </div>
               </div>
+
+              {/* Preview */}
               <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 24 }}>
                 <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 16 }}>Preview</div>
                 <div style={{
-                  borderRadius: 12, padding: 20, minHeight: 160,
+                  borderRadius: 12, overflow: 'hidden', minHeight: 200,
+                  background: backgroundImage ? undefined : bgColor,
                   backgroundImage: backgroundImage ? `url(${backgroundImage})` : undefined,
                   backgroundSize: 'cover', backgroundPosition: 'center',
-                  background: backgroundImage ? undefined : 'var(--bg-card2)',
-                  position: 'relative',
                 }}>
-                  <div style={{ background: 'rgba(0,0,0,.55)', borderRadius: 10, padding: 16 }}>
-                    <div style={{ fontWeight: 700, fontSize: 15, color: '#fff', marginBottom: 8 }}>{name}</div>
+                  <div style={{
+                    padding: 20,
+                    background: `rgba(0,0,0,${(100 - bgOpacity) / 100})`,
+                  }}>
+                    <div style={{ fontWeight: 700, fontSize: 14, color: '#fff', marginBottom: 12 }}>{name}</div>
                     {fields.slice(0, 2).map(f => (
                       <div key={f.id} style={{ marginBottom: 10 }}>
-                        <div style={{ fontSize: 11, fontWeight: 600, color: 'rgba(255,255,255,.6)', marginBottom: 4 }}>{f.label}{f.required && ' *'}</div>
-                        <div style={{ height: 30, background: 'rgba(255,255,255,.1)', borderRadius: 6 }} />
+                        <div style={{ fontSize: 11, fontWeight: 600, color: 'rgba(255,255,255,.65)', marginBottom: 4 }}>{f.label}{f.required && ' *'}</div>
+                        <div style={{ height: 28, background: fieldBgColor, borderRadius: 6, border: '1px solid rgba(255,255,255,.1)' }} />
                       </div>
                     ))}
-                    {fields.length > 2 && <div style={{ fontSize: 11, color: 'rgba(255,255,255,.4)' }}>+{fields.length - 2} campos…</div>}
-                    <div style={{ marginTop: 12, height: 32, background: color, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    {fields.length === 0 && <div style={{ fontSize: 11, color: 'rgba(255,255,255,.4)', marginBottom: 10 }}>Nenhum campo ainda…</div>}
+                    {fields.length > 2 && <div style={{ fontSize: 11, color: 'rgba(255,255,255,.4)', marginBottom: 10 }}>+{fields.length - 2} campos…</div>}
+                    <div style={{ marginTop: 8, height: 32, background: color, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       <span style={{ fontSize: 12, fontWeight: 700, color: '#fff' }}>Enviar</span>
                     </div>
                   </div>
@@ -462,6 +519,22 @@ function FormEditor({ form, onBack, onSave, isSaving }: {
           {/* ── Configurações ── */}
           {tab === 'Configurações' && (
             <div style={{ maxWidth: 500, display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+              {/* Redirecionamento */}
+              <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 24 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+                  <Link size={18} color="var(--purple)" />
+                  <div style={{ fontWeight: 700, fontSize: 14 }}>Redirecionamento Personalizado</div>
+                </div>
+                <Field label="URL de Redirecionamento (após o envio)">
+                  <input className="inp" type="url" value={redirectUrl} onChange={e => setRedirectUrl(e.target.value)}
+                    placeholder="https://obrigado.seusite.com" />
+                </Field>
+                <p style={{ fontSize: 12, color: 'var(--text2)', marginTop: 8, lineHeight: 1.5 }}>
+                  Se preenchido, o visitante será redirecionado para esta URL após enviar o formulário. Deixe vazio para exibir a mensagem de sucesso padrão.
+                </p>
+              </div>
+
               <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 24 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
                   <Globe size={18} color="var(--action)" />
