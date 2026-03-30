@@ -32,8 +32,22 @@ const DEFAULT_RANGE: DateRange = {
 }
 
 export default function Ativacoes() {
-  const { user } = useAuth()
-  return <AtivacoesContent isAdmin={user?.role === 'Admin' ?? false} />
+  const { user, loading } = useAuth()
+  // Aguarda o perfil real ser carregado antes de avaliar a role,
+  // evitando que isAdmin fique false durante o fetch inicial.
+  if (loading) return (
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: 'var(--bg)', color: 'var(--text2)', fontSize: 14, gap: 10 }}>
+      <span style={{ display: 'inline-block', width: 18, height: 18, borderRadius: '50%',
+        border: '2px solid #333', borderTopColor: 'var(--action)',
+        animation: 'spin .8s linear infinite' }} />
+      Carregando...
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+    </div>
+  )
+  // case-insensitive: aceita 'Admin', 'admin', 'ADMIN'
+  const isAdmin = user?.role?.toLowerCase() === 'admin'
+  return <AtivacoesContent isAdmin={isAdmin} />
 }
 
 function AtivacoesContent({ isAdmin }: { isAdmin: boolean }) {
