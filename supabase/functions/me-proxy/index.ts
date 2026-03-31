@@ -46,6 +46,7 @@ const ME_STATUS_MAP: Record<string, string> = {
   'released':             'Em Trânsito',
   'canceled':             'Cancelado',
   'pending':              'No Carrinho',
+  'unpaid':               'No Carrinho',
 }
 
 async function meJson(url: string, opts?: RequestInit) {
@@ -112,11 +113,11 @@ serve(async (req) => {
     if (action === 'sync-bulk') {
       const sanitizeDoc = (v: unknown): string => v ? String(v).replace(/\D/g, '') : ''
 
-      // Busca até 100 pedidos no ME (ordenados por mais recentes)
-      const { data: ordersData } = await meJson(
-        `${ME_API}/orders?per_page=100&page=1&orderBy=created_at&sortedBy=desc`
-      )
-      const orders: unknown[] = ordersData?.data ?? []
+      // Busca 3 páginas × 100 = até 300 pedidos no ME (mais recentes primeiro)
+      const pages = await Promise.all([1, 2, 3].map(page =>
+        meJson(`${ME_API}/orders?per_page=100&page=${page}&orderBy=created_at&sortedBy=desc`)
+      ))
+      const orders: unknown[] = pages.flatMap(p => p.data?.data ?? [])
 
       if (orders.length === 0) {
         return new Response(JSON.stringify({ updated: 0, total: 0 }), {
@@ -135,11 +136,10 @@ serve(async (req) => {
       console.log('[sync-bulk] HTTP subs status:', subsRes.status, '| rows:', submissions.length)
 
       // Amostras para debug
-      const sampleME  = (orders[0] as Record<string, unknown>)
-      const sampleDB  = submissions[0]
+      const sampleME    = (orders[0] as Record<string, unknown>)
+      const sampleDB    = submissions[0]
       const sampleMEDoc = sanitizeDoc((sampleME?.to as Record<string, unknown>)?.document)
       console.log('[sync-bulk] Exemplo ME doc (sanitized):', sampleMEDoc)
-      console.log('[sync-bulk] Exemplo DB row keys:', Object.keys(sampleDB ?? {}))
       console.log('[sync-bulk] Exemplo DB data keys:', Object.keys(sampleDB?.data ?? {}))
       console.log('[sync-bulk] Exemplo DB data values (primeiros 5):', Object.values(sampleDB?.data ?? {}).slice(0, 5))
       console.log(`[sync-bulk] ${orders.length} orders ME | ${submissions.length} submissões sem tracking no DB`)
@@ -147,10 +147,13 @@ serve(async (req) => {
       let updated = 0
 
       for (const order of orders) {
-        const o       = order as Record<string, unknown>
-        const meDoc   = sanitizeDoc((o.to as Record<string, unknown>)?.document)
-        const meId    = String(o.id ?? '')
-        const track   = o.tracking ? String(o.tracking) : ''
+        const o        = order as Record<string, unknown>
+        const meDoc    = sanitizeDoc((o.to as Record<string, unknown>)?.document)
+        const meId     = String(o.id ?? '')
+        // Fallback: tracking → melhorenvio_tracking (etiqueta gerada mas não paga)
+        const track    = o.tracking
+          ? String(o.tracking)
+          : (o.melhorenvio_tracking ? String(o.melhorenvio_tracking) : '')
         const meStatus = ME_STATUS_MAP[String(o.status ?? '')] ?? 'Em Trânsito'
 
         if (!meDoc) continue
@@ -163,9 +166,8 @@ serve(async (req) => {
 
         if (!match) continue
 
-        console.log(`[sync-bulk] MATCH id=${match.id} meId=${meId} doc=${meDoc} track=${track || '(vazio)'}`)
+        console.log(`[sync-bulk] MATCH id=${match.id} meId=${meId} doc=${meDoc} status=${meStatus} track=${track || '(vazio)'}`)
 
-        // Monta patch — tracking pode estar vazio se etiqueta ainda não foi gerada
         const patch: Record<string, string> = { me_cart_id: meId, status: meStatus }
         if (track) patch.tracking_code = track
 
@@ -195,9 +197,9 @@ serve(async (req) => {
           debug: {
             pendingDbCount: submissions.length,
             subsHttpStatus: subsRes.status,
-            meCPF:     sampleMEDoc,
-            meStatus:  String((sampleME as Record<string, unknown>)?.status ?? ''),
-            dbRowKeys: Object.keys(sampleDB ?? {}),
+            meCPF:      sampleMEDoc,
+            meStatus:   String((sampleME as Record<string, unknown>)?.status ?? ''),
+            dbRowKeys:  Object.keys(sampleDB ?? {}),
             dbDataKeys: Object.keys(sampleDB?.data ?? {}),
             dbDataValues: Object.values(sampleDB?.data ?? {}).slice(0, 5),
             dbRowFull:  sampleDB,
