@@ -43,6 +43,7 @@ const ME_STATUS_MAP: Record<string, string> = {
   'delivered_to_agency':  'Em Trânsito',
   'with_carrier':         'Em Trânsito',
   'out_for_delivery':     'Em Trânsito',
+  'released':             'Em Trânsito',
   'canceled':             'Cancelado',
   'pending':              'No Carrinho',
 }
