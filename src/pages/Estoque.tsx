@@ -14,7 +14,10 @@ import { useToast } from '@/components/ui/Toast';
 import { supabase } from '@/lib/supabase/client';
 
 type DbItem    = { id: string; name: string; category: string; qty: number; unit: string }
-type Submission = { id: string; form_id: string; data: Record<string, string>; submitted_at: string; status: string }
+type Submission = {
+  id: string; form_id: string; data: Record<string, string>; submitted_at: string
+  status: string; tracking_code: string; carrier: string
+}
 type ExtraItem  = { id: string; name: string }
 
 const SUB_STATUSES = ['Pendente', 'Em Trânsito', 'Entregue', 'Cancelado'] as const
@@ -36,6 +39,37 @@ function extractProduto(data: Record<string, string>): string {
   if (k) return data[k]
   const publicKeys = Object.keys(data).filter(k => !k.startsWith('_'))
   return publicKeys.length > 0 ? data[publicKeys[publicKeys.length - 1]] || '—' : '—'
+}
+
+/** Extracts the meta/milestone value from submission data */
+function extractMeta(data: Record<string, string>): string {
+  const k = Object.keys(data).find(k =>
+    /meta|premiação|premiacao|plano|nível|nivel|milestone/i.test(k) && !k.startsWith('_')
+  )
+  if (k) return data[k]
+  // Fallback: look for values that look like milestones
+  const vals = Object.entries(data).filter(([key]) => !key.startsWith('_')).map(([, v]) => v)
+  return vals.find(v => /\d+[kKmM]|\d{4,}/.test(v)) || ''
+}
+
+function metaBadgeStyle(meta: string): React.CSSProperties {
+  const m = meta.toLowerCase().replace(/\s/g, '')
+  const bg =
+    m.includes('1m')   || m.includes('1.000.000') ? '#b45309' :   // gold
+    m.includes('500k') || m.includes('500.000')   ? '#7c3aed' :   // purple
+    m.includes('100k') || m.includes('100.000')   ? '#059669' :   // green
+    m.includes('50k')  || m.includes('50.000')    ? '#0284c7' :   // blue
+    '#6b7280'                                                       // gray
+  return { background: `color-mix(in srgb, ${bg} 18%, var(--bg-card2))`,
+    color: bg, border: `1px solid color-mix(in srgb, ${bg} 35%, var(--border))`,
+    borderRadius: 20, padding: '2px 9px', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }
+}
+
+function trackingUrl(code: string, carrier: string): string {
+  const c = carrier.toLowerCase()
+  if (c.includes('correios')) return `https://rastreamento.correios.com.br/app/index.php?objetos=${code}`
+  // Default: Melhor Envio / generic
+  return `https://melhorrastreio.com.br/rastreio/${code}`
 }
 
 /** Finds the best matching inventory item for a raw produto string */
@@ -88,6 +122,8 @@ function EstoqueContent() {
   const [subEditPremioId, setSubEditPremioId] = useState('');
   const [subEditExtras, setSubEditExtras]     = useState<ExtraItem[]>([]);
   const [subEditExtraSelect, setSubEditExtraSelect] = useState('');
+  const [subEditTracking, setSubEditTracking] = useState('');
+  const [subEditCarrier, setSubEditCarrier]   = useState('');
   const [subIsSaving, setSubIsSaving]         = useState(false);
 
   // ── Fetch ──────────────────────────────────────────────────────────────────
@@ -96,7 +132,7 @@ function EstoqueContent() {
       setIsLoading(true);
       const [{ data: inv, error: ie }, { data: subs, error: se }] = await Promise.all([
         supabase.from('inventory').select('id,name,category,qty,unit').order('name'),
-        supabase.from('form_submissions').select('id,form_id,data,submitted_at,status').order('submitted_at', { ascending: false }),
+        supabase.from('form_submissions').select('id,form_id,data,submitted_at,status,tracking_code,carrier').order('submitted_at', { ascending: false }),
       ]);
       if (ie) toast(ie.message, 'error');
       if (se) toast(se.message, 'error');
@@ -209,6 +245,8 @@ function EstoqueContent() {
     }
     setSubEditExtras(extras);
     setSubEditExtraSelect('');
+    setSubEditTracking(row.tracking_code || '');
+    setSubEditCarrier(row.carrier || '');
   }
 
   async function saveSubEdit() {
@@ -220,14 +258,20 @@ function EstoqueContent() {
     if (subEditPremioId) newData._premio_id = subEditPremioId;
     if (subEditExtras.length > 0) newData._extras = JSON.stringify(subEditExtras.map(e => e.id));
 
+    // Auto-promote to Em Trânsito when a tracking code is added from Pendente
+    const finalStatus =
+      subEditTracking.trim() && subEditStatus === 'Pendente'
+        ? 'Em Trânsito'
+        : subEditStatus;
+
     const { error } = await supabase.from('form_submissions')
-      .update({ data: newData, status: subEditStatus })
+      .update({ data: newData, status: finalStatus, tracking_code: subEditTracking.trim(), carrier: subEditCarrier.trim() })
       .eq('id', subEditRow.id);
     if (error) { toast(error.message, 'error'); setSubIsSaving(false); return; }
 
     // Decrement inventory when transitioning from Pendente → Em Trânsito / Entregue
     const wasNotDispatched = subEditRow.status === 'Pendente';
-    const nowDispatched    = subEditStatus === 'Em Trânsito' || subEditStatus === 'Entregue';
+    const nowDispatched    = finalStatus === 'Em Trânsito' || finalStatus === 'Entregue';
     if (wasNotDispatched && nowDispatched) {
       const toDecrement: string[] = [];
       if (subEditPremioId) toDecrement.push(subEditPremioId);
@@ -245,7 +289,9 @@ function EstoqueContent() {
       if (toDecrement.length > 0) toast('Estoque decrementado automaticamente.', 'info');
     }
 
-    setSubmissions(p => p.map(s => s.id === subEditRow.id ? { ...s, data: newData, status: subEditStatus } : s));
+    setSubmissions(p => p.map(s => s.id === subEditRow.id
+      ? { ...s, data: newData, status: finalStatus, tracking_code: subEditTracking.trim(), carrier: subEditCarrier.trim() }
+      : s));
     setSubEditRow(null);
     setSubIsSaving(false);
     toast('Envio atualizado!', 'success');
@@ -454,7 +500,7 @@ function EstoqueContent() {
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr>
-                      {(['Cliente', 'Produto/Prêmio', 'Data', 'Status'] as const).map(h => (
+                      {(['Cliente', 'Meta', 'Produto/Prêmio', 'Rastreio', 'Data', 'Status'] as const).map(h => (
                         <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontSize: 11, fontWeight: 700,
                           color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.06em', whiteSpace: 'nowrap',
                           background: 'var(--bg-card)', position: 'sticky', top: 0, zIndex: 10,
@@ -468,7 +514,7 @@ function EstoqueContent() {
                   </thead>
                   <tbody>
                     {filtered.length === 0 && (
-                      <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--text2)', padding: 40, fontSize: 13 }}>
+                      <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--text2)', padding: 40, fontSize: 13 }}>
                         {subSearch || subStatusFilter !== 'Todos' || subShowNoStock
                           ? 'Nenhum resultado encontrado.'
                           : 'Nenhum envio registrado.'}
@@ -488,9 +534,17 @@ function EstoqueContent() {
                             ? 'color-mix(in srgb, var(--red) 14%, var(--bg-card2))'
                             : 'color-mix(in srgb, var(--action) 5%, var(--bg-card2))')}
                           onMouseLeave={e => (e.currentTarget.style.background = rowBg)}>
+                          {/* Cliente */}
                           <td style={{ padding: '11px 16px', fontSize: 13, fontWeight: 600, borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
                             {extractNome(row.data)}
                           </td>
+                          {/* Meta */}
+                          <td style={{ padding: '11px 16px', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
+                            {(() => { const m = extractMeta(row.data); return m
+                              ? <span style={metaBadgeStyle(m)}>{m}</span>
+                              : <span style={{ color: 'var(--text2)', fontSize: 12 }}>—</span>; })()}
+                          </td>
+                          {/* Produto/Prêmio */}
                           <td style={{ padding: '11px 16px', fontSize: 13, borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                               <span>{prodName}</span>
@@ -502,6 +556,22 @@ function EstoqueContent() {
                               )}
                             </div>
                           </td>
+                          {/* Rastreio */}
+                          <td style={{ padding: '11px 16px', fontSize: 12, borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
+                            {row.tracking_code ? (
+                              <a href={trackingUrl(row.tracking_code, row.carrier)} target="_blank" rel="noreferrer"
+                                style={{ color: 'var(--action)', fontWeight: 600, textDecoration: 'none',
+                                  display: 'flex', alignItems: 'center', gap: 4 }}>
+                                {row.tracking_code}
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
+                                </svg>
+                              </a>
+                            ) : (
+                              <span style={{ color: 'var(--text2)', fontStyle: 'italic' }}>Pendente</span>
+                            )}
+                          </td>
+                          {/* Data */}
                           <td style={{ padding: '11px 16px', fontSize: 13, color: 'var(--text2)', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
                             {new Date(row.submitted_at).toLocaleDateString('pt-BR')}
                           </td>
@@ -583,8 +653,56 @@ function EstoqueContent() {
               </div>
             </div>
 
+            {/* API Inversa — atualização externa de rastreio */}
             <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 24 }}>
-              <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 12 }}>Documentação da API</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+                <div style={{ width: 40, height: 40, borderRadius: 10, background: 'color-mix(in srgb, var(--orange) 15%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <RefreshCw size={20} color="var(--orange)" />
+                </div>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 15 }}>API Inversa — Atualização de Rastreio</div>
+                  <div style={{ fontSize: 12, color: 'var(--text2)' }}>Sistemas externos podem atualizar status e rastreio via PATCH</div>
+                </div>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {/* Endpoint */}
+                <div style={{ background: 'var(--bg-card2)', borderRadius: 8, padding: '10px 14px', fontFamily: 'monospace', fontSize: 12 }}>
+                  <span style={{ color: 'var(--orange)', fontWeight: 700 }}>PATCH </span>
+                  <span style={{ color: 'var(--text2)' }}>/rest/v1/form_submissions?id=eq.</span>
+                  <span style={{ color: 'var(--action)' }}>{'{submission_id}'}</span>
+                </div>
+                {/* Headers */}
+                <div style={{ background: 'var(--bg-card2)', borderRadius: 8, padding: '10px 14px', fontSize: 12 }}>
+                  <div style={{ fontWeight: 700, color: 'var(--text2)', marginBottom: 6, fontSize: 11, textTransform: 'uppercase', letterSpacing: '.06em' }}>Headers obrigatórios</div>
+                  {[
+                    ['apikey', '<SERVICE_ROLE_KEY>'],
+                    ['Authorization', 'Bearer <SERVICE_ROLE_KEY>'],
+                    ['Content-Type', 'application/json'],
+                  ].map(([k, v]) => (
+                    <div key={k} style={{ display: 'flex', gap: 8, marginBottom: 2 }}>
+                      <span style={{ color: 'var(--action)', fontFamily: 'monospace' }}>{k}:</span>
+                      <span style={{ color: 'var(--text2)', fontFamily: 'monospace' }}>{v}</span>
+                    </div>
+                  ))}
+                </div>
+                {/* Body */}
+                <div style={{ background: 'var(--bg-card2)', borderRadius: 8, padding: '10px 14px', fontFamily: 'monospace', fontSize: 12 }}>
+                  <div style={{ fontWeight: 700, color: 'var(--text2)', marginBottom: 6, fontSize: 11, textTransform: 'uppercase', letterSpacing: '.06em' }}>Body (JSON)</div>
+                  <pre style={{ margin: 0, color: 'var(--text)', lineHeight: 1.6 }}>{`{
+  "status": "Em Trânsito",
+  "tracking_code": "BR123456789BR",
+  "carrier": "Correios"
+}`}</pre>
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text2)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <AlertTriangle size={11} />
+                  Use a chave <strong>service_role</strong> (nunca a anon) — mantenha-a no backend, nunca no frontend.
+                </div>
+              </div>
+            </div>
+
+            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 24 }}>
+              <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 12 }}>Documentação da API Interna</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {[
                   { method: 'GET',    path: '/api/estoque',     desc: 'Listar todos os itens' },
@@ -703,6 +821,31 @@ function EstoqueContent() {
               )}
             </Field>
 
+            {/* Rastreio */}
+            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 12 }}>
+              <Field label="Código de Rastreio">
+                <input className="inp" value={subEditTracking}
+                  onChange={e => setSubEditTracking(e.target.value)}
+                  placeholder="Ex: BR123456789BR" />
+              </Field>
+              <Field label="Transportadora">
+                <input className="inp" value={subEditCarrier}
+                  onChange={e => setSubEditCarrier(e.target.value)}
+                  placeholder="Ex: Correios" />
+              </Field>
+            </div>
+
+            {/* Info: auto-promoção de status */}
+            {subEditTracking.trim() && subEditStatus === 'Pendente' && (
+              <div style={{ background: 'color-mix(in srgb, var(--action) 10%, var(--bg-card2))',
+                border: '1px solid color-mix(in srgb, var(--action) 30%, var(--border))',
+                borderRadius: 8, padding: '8px 12px', fontSize: 12, color: 'var(--action)', fontWeight: 600,
+                display: 'flex', alignItems: 'center', gap: 8 }}>
+                <AlertTriangle size={13} />
+                Status será promovido para "Em Trânsito" automaticamente.
+              </div>
+            )}
+
             {/* Campos do formulário */}
             {Object.keys(subEditData).map(key => (
               <Field key={key} label={key}>
@@ -711,7 +854,9 @@ function EstoqueContent() {
             ))}
 
             {/* Aviso de decremento */}
-            {subEditRow?.status === 'Pendente' && (subEditStatus === 'Em Trânsito' || subEditStatus === 'Entregue') && (
+            {subEditRow?.status === 'Pendente' &&
+              (subEditStatus === 'Em Trânsito' || subEditStatus === 'Entregue' ||
+               (subEditTracking.trim() && subEditStatus === 'Pendente')) && (
               <div style={{ background: 'color-mix(in srgb, var(--orange) 10%, var(--bg-card2))',
                 border: '1px solid color-mix(in srgb, var(--orange) 30%, var(--border))',
                 borderRadius: 8, padding: '10px 12px', fontSize: 12, color: 'var(--orange)', fontWeight: 600,
