@@ -14,8 +14,26 @@ import { useToast } from '@/components/ui/Toast';
 import { supabase } from '@/lib/supabase/client';
 import type { AwardStatus } from '@/lib/supabase/database.types';
 
-type DbItem  = { id: string; name: string; category: string; qty: number; unit: string }
-type DbAward = { id: string; client: string; award: string; status: AwardStatus; date: string; tracking: string }
+type DbItem    = { id: string; name: string; category: string; qty: number; unit: string }
+type Submission = { id: string; form_id: string; data: Record<string, string>; submitted_at: string; status: string }
+
+const SUB_STATUSES = ['Pendente', 'Em Trânsito', 'Entregue', 'Cancelado'] as const
+
+const STATUS_COLORS: Record<string, string> = {
+  'Pendente':    'var(--orange)',
+  'Em Trânsito': 'var(--action)',
+  'Entregue':    'var(--green)',
+  'Cancelado':   'var(--red)',
+}
+
+function extractNome(data: Record<string, string>): string {
+  const k = Object.keys(data).find(k => /nome|cliente|name/i.test(k))
+  return (k ? data[k] : Object.values(data)[0]) || '—'
+}
+function extractProduto(data: Record<string, string>): string {
+  const k = Object.keys(data).find(k => /prêmio|premio|produto|item|escolha|award/i.test(k))
+  return k ? data[k] : (Object.values(data)[Object.values(data).length - 1] || '—')
+}
 
 const TABS = ['Itens Internos', 'Premiações', 'Integrações'];
 
@@ -40,7 +58,6 @@ function EstoqueContent() {
   const toast = useToast();
   const [tab, setTab]     = useState('Itens Internos');
   const [items, setItems] = useState<DbItem[]>([]);
-  const [awards, setAwards] = useState<DbAward[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving]   = useState(false);
   const [modal, setModal]     = useState(false);
@@ -48,21 +65,30 @@ function EstoqueContent() {
   const [form, setForm] = useState({ name: '', category: '', qty: '', unit: '' });
   const [apiKey, setApiKey] = useState('ME-sk-••••••••••••••••••••••••');
   const [webhook, setWebhook] = useState('https://api.cakto.com.br/webhooks/estoque');
-  const [searchItems, setSearchItems]   = useState('');
-  const [searchAwards, setSearchAwards] = useState('');
+  const [searchItems, setSearchItems] = useState('');
+
+  // ── Submissions (Premiações / Logística) ──────────────────────────────────
+  const [submissions, setSubmissions]       = useState<Submission[]>([]);
+  const [subSearch, setSubSearch]           = useState('');
+  const [subStatusFilter, setSubStatusFilter] = useState('Todos');
+  const [subDeleteId, setSubDeleteId]       = useState<string | null>(null);
+  const [subEditRow, setSubEditRow]         = useState<Submission | null>(null);
+  const [subEditData, setSubEditData]       = useState<Record<string, string>>({});
+  const [subEditStatus, setSubEditStatus]   = useState('Pendente');
+  const [subIsSaving, setSubIsSaving]       = useState(false);
 
   // ── Fetch ──────────────────────────────────────────────────────────────────
   useEffect(() => {
     async function load() {
       setIsLoading(true);
-      const [{ data: inv, error: ie }, { data: aw, error: ae }] = await Promise.all([
+      const [{ data: inv, error: ie }, { data: subs, error: se }] = await Promise.all([
         supabase.from('inventory').select('id,name,category,qty,unit').order('name'),
-        supabase.from('awards').select('id,client,award,status,date,tracking').order('date', { ascending: false }),
+        supabase.from('form_submissions').select('id,form_id,data,submitted_at,status').order('submitted_at', { ascending: false }),
       ]);
       if (ie) toast(ie.message, 'error');
-      if (ae) toast(ae.message, 'error');
+      if (se) toast(se.message, 'error');
       if (inv) setItems(inv as DbItem[]);
-      if (aw) setAwards(aw as DbAward[]);
+      if (subs) setSubmissions(subs as Submission[]);
       setIsLoading(false);
     }
     load();
@@ -107,6 +133,46 @@ function EstoqueContent() {
     if (error) { toast(error.message, 'error'); return; }
     setItems(p => p.filter(it => it.id !== id));
     toast('Item removido', 'info');
+  }
+
+  // ── Submission actions ───────────────────────────────────────────────────
+  async function updateSubStatus(id: string, status: string) {
+    const { error } = await supabase.from('form_submissions').update({ status }).eq('id', id);
+    if (error) { toast(error.message, 'error'); return; }
+    setSubmissions(p => p.map(s => s.id === id ? { ...s, status } : s));
+  }
+
+  async function deleteSubmission(id: string) {
+    const sub = submissions.find(s => s.id === id);
+    const { error } = await supabase.from('form_submissions').delete().eq('id', id);
+    if (error) { toast(error.message, 'error'); return; }
+    setSubmissions(p => p.filter(s => s.id !== id));
+    // Decrement response counter on parent form
+    if (sub) {
+      const { data: f } = await supabase.from('forms').select('responses').eq('id', sub.form_id).single();
+      if (f) supabase.from('forms').update({ responses: Math.max(0, (f.responses || 1) - 1) }).eq('id', sub.form_id);
+    }
+    toast('Envio removido.', 'info');
+    setSubDeleteId(null);
+  }
+
+  function openSubEdit(row: Submission) {
+    setSubEditRow(row);
+    setSubEditData({ ...row.data });
+    setSubEditStatus(row.status);
+  }
+
+  async function saveSubEdit() {
+    if (!subEditRow) return;
+    setSubIsSaving(true);
+    const { error } = await supabase.from('form_submissions')
+      .update({ data: subEditData, status: subEditStatus })
+      .eq('id', subEditRow.id);
+    if (error) { toast(error.message, 'error'); setSubIsSaving(false); return; }
+    setSubmissions(p => p.map(s => s.id === subEditRow.id ? { ...s, data: subEditData, status: subEditStatus } : s));
+    setSubEditRow(null);
+    setSubIsSaving(false);
+    toast('Envio atualizado!', 'success');
   }
 
   if (isLoading) {
@@ -197,69 +263,130 @@ function EstoqueContent() {
           </div>
         )}
 
-        {/* Premiações */}
-        {tab === 'Premiações' && (
-          <div style={{ marginTop: 20 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12, marginBottom: 24 }}>
-              {([
-                ['Em Trânsito', 'var(--action)'],
-                ['Entregue',    'var(--green)'],
-                ['Pendente',    'var(--orange)'],
-                ['Cancelado',   'var(--red)'],
-              ] as [string, string][]).map(([label, color]) => (
-                <div key={label} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16 }}>
-                  <div style={{ fontSize: 28, fontWeight: 800, color }}>{awards.filter(a => a.status === label).length}</div>
-                  <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 4 }}>{label}</div>
+        {/* Premiações / Logística */}
+        {tab === 'Premiações' && (() => {
+          const filtered = submissions.filter(s => {
+            const matchStatus = subStatusFilter === 'Todos' || s.status === subStatusFilter;
+            const term = subSearch.trim().toLowerCase();
+            const matchSearch = !term || Object.values(s.data).some(v => String(v).toLowerCase().includes(term));
+            return matchStatus && matchSearch;
+          });
+
+          const actionBtn = (color: string): React.CSSProperties => ({
+            background: 'none', border: 'none', cursor: 'pointer', color,
+            padding: '5px 6px', borderRadius: 6, display: 'flex', alignItems: 'center',
+          });
+
+          return (
+            <div style={{ marginTop: 20 }}>
+              {/* KPI cards */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 12, marginBottom: 24 }}>
+                {SUB_STATUSES.map(s => (
+                  <div key={s} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16, cursor: 'pointer',
+                    outline: subStatusFilter === s ? `2px solid ${STATUS_COLORS[s]}` : 'none' }}
+                    onClick={() => setSubStatusFilter(p => p === s ? 'Todos' : s)}>
+                    <div style={{ fontSize: 28, fontWeight: 800, color: STATUS_COLORS[s] }}>
+                      {submissions.filter(x => x.status === s).length}
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 4 }}>{s}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Toolbar */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
+                <div style={{ position: 'relative', flex: 1, maxWidth: 360 }}>
+                  <Search size={15} color="var(--text2)" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
+                  <input className="inp" value={subSearch} onChange={e => setSubSearch(e.target.value)}
+                    placeholder="Buscar por nome, CPF, produto…"
+                    style={{ paddingLeft: 36, width: '100%', boxSizing: 'border-box' }} />
                 </div>
-              ))}
-            </div>
-            <div style={{ position: 'relative', marginBottom: 14 }}>
-              <Search size={15} color="var(--text2)" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
-              <input
-                className="inp"
-                value={searchAwards}
-                onChange={e => setSearchAwards(e.target.value)}
-                placeholder="Buscar premiação..."
-                style={{ paddingLeft: 36, width: '100%', boxSizing: 'border-box', maxWidth: 360 }}
-              />
-            </div>
-            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, overflow: 'hidden' }}>
-              <div className="scroll-x">
-                <table className="tbl">
+                {/* Status filter pills */}
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {['Todos', ...SUB_STATUSES].map(s => (
+                    <button key={s} onClick={() => setSubStatusFilter(s)}
+                      style={{ padding: '5px 12px', borderRadius: 20, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600,
+                        background: subStatusFilter === s ? (STATUS_COLORS[s] || 'var(--action)') : 'var(--bg-card2)',
+                        color: subStatusFilter === s ? '#fff' : 'var(--text2)',
+                        transition: 'background .15s' }}>
+                      {s}
+                    </button>
+                  ))}
+                </div>
+                <span style={{ fontSize: 12, color: 'var(--text2)', whiteSpace: 'nowrap' }}>
+                  {filtered.length} de {submissions.length}
+                </span>
+              </div>
+
+              {/* Table */}
+              <div style={{ border: '1px solid var(--border)', borderRadius: 14, overflow: 'hidden', maxHeight: '60vh', overflowY: 'auto', overflowX: 'auto', boxShadow: '0 4px 24px rgba(0,0,0,0.2)' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
-                    <tr><th>Colaborador</th><th>Premiação</th><th>Data</th><th>Status</th></tr>
+                    <tr>
+                      {(['Cliente', 'Produto/Prêmio', 'Data', 'Status'] as const).map(h => (
+                        <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: 'var(--text2)',
+                          textTransform: 'uppercase', letterSpacing: '.06em', whiteSpace: 'nowrap',
+                          background: 'var(--bg-card)', position: 'sticky', top: 0, zIndex: 10,
+                          borderBottom: '1px solid var(--border)', backdropFilter: 'blur(8px)' }}>{h}</th>
+                      ))}
+                      <th style={{ padding: '10px 16px', textAlign: 'right', fontSize: 11, fontWeight: 700, color: 'var(--text2)',
+                        textTransform: 'uppercase', letterSpacing: '.06em', background: 'var(--bg-card)',
+                        position: 'sticky', top: 0, zIndex: 10, borderBottom: '1px solid var(--border)',
+                        backdropFilter: 'blur(8px)', whiteSpace: 'nowrap' }}>Ações</th>
+                    </tr>
                   </thead>
                   <tbody>
-                    {awards.length === 0 && (
-                      <tr><td colSpan={4} style={{ textAlign: 'center', color: 'var(--text2)', padding: 32 }}>Nenhuma premiação registrada.</td></tr>
-                    )}
-                    {awards.filter(a =>
-                      !searchAwards.trim() ||
-                      a.client.toLowerCase().includes(searchAwards.toLowerCase()) ||
-                      a.award.toLowerCase().includes(searchAwards.toLowerCase())
-                    ).length === 0 && searchAwards.trim() && (
-                      <tr><td colSpan={4} style={{ textAlign: 'center', color: 'var(--text2)', padding: 32, fontSize: 13 }}>
-                        Nenhum resultado para "{searchAwards}".
+                    {filtered.length === 0 && (
+                      <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--text2)', padding: 40, fontSize: 13 }}>
+                        {subSearch || subStatusFilter !== 'Todos' ? `Nenhum resultado encontrado.` : 'Nenhum envio registrado.'}
                       </td></tr>
                     )}
-                    {awards.filter(a =>
-                      !searchAwards.trim() ||
-                      a.client.toLowerCase().includes(searchAwards.toLowerCase()) ||
-                      a.award.toLowerCase().includes(searchAwards.toLowerCase())
-                    ).map(a => (
-                      <tr key={a.id}>
-                        <td style={{ fontWeight: 600 }}>{a.client}</td>
-                        <td style={{ fontSize: 13 }}>{a.award}</td>
-                        <td style={{ color: 'var(--text2)', fontSize: 13 }}>{a.date}</td>
-                        <td><Badge label={a.status} color={AWARD_STATUS_COLORS[a.status] || 'var(--text2)'} /></td>
+                    {filtered.map((row, i) => (
+                      <tr key={row.id}
+                        style={{ background: i % 2 === 0 ? 'var(--bg-card)' : 'var(--bg-card2)', transition: 'background .15s' }}
+                        onMouseEnter={e => (e.currentTarget.style.background = 'color-mix(in srgb, var(--action) 5%, var(--bg-card2))')}
+                        onMouseLeave={e => (e.currentTarget.style.background = i % 2 === 0 ? 'var(--bg-card)' : 'var(--bg-card2)')}
+                      >
+                        <td style={{ padding: '11px 16px', fontSize: 13, fontWeight: 600, borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
+                          {extractNome(row.data)}
+                        </td>
+                        <td style={{ padding: '11px 16px', fontSize: 13, borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
+                          {extractProduto(row.data)}
+                        </td>
+                        <td style={{ padding: '11px 16px', fontSize: 13, color: 'var(--text2)', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
+                          {new Date(row.submitted_at).toLocaleDateString('pt-BR')}
+                        </td>
+                        <td style={{ padding: '11px 16px', borderBottom: '1px solid var(--border)' }}>
+                          <select value={row.status}
+                            onChange={e => updateSubStatus(row.id, e.target.value)}
+                            style={{ background: `color-mix(in srgb, ${STATUS_COLORS[row.status] || 'var(--text2)'} 18%, var(--bg-card2))`,
+                              color: STATUS_COLORS[row.status] || 'var(--text2)', border: `1px solid ${STATUS_COLORS[row.status] || 'var(--border)'}`,
+                              borderRadius: 20, padding: '3px 10px', fontSize: 12, fontWeight: 700, cursor: 'pointer', outline: 'none' }}>
+                            {SUB_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                          </select>
+                        </td>
+                        <td style={{ padding: '11px 16px', borderBottom: '1px solid var(--border)', textAlign: 'right' }}>
+                          <div style={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
+                            <button onClick={() => openSubEdit(row)} title="Editar" style={actionBtn('var(--action)')}
+                              onMouseEnter={e => (e.currentTarget.style.background = 'color-mix(in srgb, var(--action) 12%, transparent)')}
+                              onMouseLeave={e => (e.currentTarget.style.background = 'none')}>
+                              <Pencil size={13} />
+                            </button>
+                            <button onClick={() => setSubDeleteId(row.id)} title="Excluir" style={actionBtn('var(--red)')}
+                              onMouseEnter={e => (e.currentTarget.style.background = 'color-mix(in srgb, var(--red) 12%, transparent)')}
+                              onMouseLeave={e => (e.currentTarget.style.background = 'none')}>
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* Integrações */}
         {tab === 'Integrações' && (
@@ -349,6 +476,38 @@ function EstoqueContent() {
               <Button variant="secondary" onClick={() => setModal(false)}>Cancelar</Button>
               <Button onClick={saveItem} disabled={isSaving}>{editItem ? (isSaving ? 'Salvando…' : 'Salvar') : (isSaving ? 'Adicionando…' : 'Adicionar')}</Button>
             </div>
+          </div>
+        </Modal>
+
+        {/* Modal — Excluir Envio */}
+        <Modal open={subDeleteId !== null} onClose={() => setSubDeleteId(null)} title="Excluir Envio">
+          <div style={{ fontSize: 14, color: 'var(--text2)', marginBottom: 20 }}>
+            Esta ação é irreversível. O envio será removido e o contador de respostas do formulário será decrementado.
+          </div>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <Button variant="secondary" onClick={() => setSubDeleteId(null)}>Cancelar</Button>
+            <Button variant="destructive" icon={Trash2} onClick={() => deleteSubmission(subDeleteId!)}>Excluir</Button>
+          </div>
+        </Modal>
+
+        {/* Modal — Editar Envio */}
+        <Modal open={subEditRow !== null} onClose={() => setSubEditRow(null)} title="Editar Dados do Envio">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <Field label="Status">
+              <select className="inp" value={subEditStatus} onChange={e => setSubEditStatus(e.target.value)}
+                style={{ color: STATUS_COLORS[subEditStatus] || 'var(--text)', fontWeight: 700 }}>
+                {SUB_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </Field>
+            {Object.keys(subEditData).map(key => (
+              <Field key={key} label={key}>
+                <input className="inp" value={subEditData[key] || ''} onChange={e => setSubEditData(p => ({ ...p, [key]: e.target.value }))} />
+              </Field>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 20 }}>
+            <Button variant="secondary" onClick={() => setSubEditRow(null)}>Cancelar</Button>
+            <Button onClick={saveSubEdit} disabled={subIsSaving}>{subIsSaving ? 'Salvando…' : 'Salvar'}</Button>
           </div>
         </Modal>
       </div>
