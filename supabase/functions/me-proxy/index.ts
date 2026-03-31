@@ -124,13 +124,15 @@ serve(async (req) => {
         })
       }
 
-      // Busca submissões sem tracking_code OU com me_cart_id mas sem rastreio
+      // Busca submissões sem tracking_code (NULL ou string vazia)
       const subsRes = await fetch(
-        `${SB_URL}/rest/v1/form_submissions?tracking_code=eq.&select=id,data,me_cart_id,status`,
+        `${SB_URL}/rest/v1/form_submissions?or=(tracking_code.is.null,tracking_code.eq.)&select=id,data,me_cart_id,status`,
         { headers: SB_HEADERS }
       )
-      const submissions: Array<{ id: string; data: Record<string, string>; me_cart_id: string; status: string }> =
-        await subsRes.json()
+      const subsText = await subsRes.text()
+      let submissions: Array<{ id: string; data: Record<string, string>; me_cart_id: string; status: string }> = []
+      try { submissions = JSON.parse(subsText) } catch { console.error('[sync-bulk] parse subs error:', subsText.slice(0, 300)) }
+      console.log('[sync-bulk] HTTP subs status:', subsRes.status, '| rows:', submissions.length)
 
       // Amostras para debug
       const sampleME  = (orders[0] as Record<string, unknown>)
@@ -191,6 +193,8 @@ serve(async (req) => {
           updated: 0,
           total: orders.length,
           debug: {
+            pendingDbCount: submissions.length,
+            subsHttpStatus: subsRes.status,
             meCPF:     sampleMEDoc,
             meStatus:  String((sampleME as Record<string, unknown>)?.status ?? ''),
             dbRowKeys: Object.keys(sampleDB ?? {}),
