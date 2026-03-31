@@ -1,8 +1,8 @@
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { Package, Plug, Plus, Pencil, Trash2, Link, Copy, RefreshCw, Loader2, Search } from 'lucide-react';
+import { Package, Plug, Plus, Pencil, Trash2, Link, Copy, RefreshCw, Loader2, Search, AlertTriangle, X } from 'lucide-react';
 import { useAuth } from '@/lib/authContext';
 import { Header } from '@/components/Header';
 import { PillTabs } from '@/components/ui/PillTabs';
@@ -12,10 +12,10 @@ import { Modal } from '@/components/ui/Modal';
 import { Field } from '@/components/ui/Field';
 import { useToast } from '@/components/ui/Toast';
 import { supabase } from '@/lib/supabase/client';
-import type { AwardStatus } from '@/lib/supabase/database.types';
 
 type DbItem    = { id: string; name: string; category: string; qty: number; unit: string }
 type Submission = { id: string; form_id: string; data: Record<string, string>; submitted_at: string; status: string }
+type ExtraItem  = { id: string; name: string }
 
 const SUB_STATUSES = ['Pendente', 'Em Trânsito', 'Entregue', 'Cancelado'] as const
 
@@ -27,28 +27,37 @@ const STATUS_COLORS: Record<string, string> = {
 }
 
 function extractNome(data: Record<string, string>): string {
-  const k = Object.keys(data).find(k => /nome|cliente|name/i.test(k))
-  return (k ? data[k] : Object.values(data)[0]) || '—'
+  const k = Object.keys(data).find(k => /nome|cliente|name/i.test(k) && !k.startsWith('_'))
+  return (k ? data[k] : Object.values(data).filter((_, i) => !Object.keys(data)[i].startsWith('_'))[0]) || '—'
 }
+
 function extractProduto(data: Record<string, string>): string {
-  const k = Object.keys(data).find(k => /prêmio|premio|produto|item|escolha|award/i.test(k))
-  return k ? data[k] : (Object.values(data)[Object.values(data).length - 1] || '—')
+  const k = Object.keys(data).find(k => /prêmio|premio|produto|item|escolha|award/i.test(k) && !k.startsWith('_'))
+  if (k) return data[k]
+  const publicKeys = Object.keys(data).filter(k => !k.startsWith('_'))
+  return publicKeys.length > 0 ? data[publicKeys[publicKeys.length - 1]] || '—' : '—'
+}
+
+/** Finds the best matching inventory item for a raw produto string */
+function matchInventoryItem(produto: string, invItems: DbItem[]): DbItem | undefined {
+  if (!produto || produto === '—') return undefined
+  const p = produto.toLowerCase().trim()
+  // Exact match
+  let found = invItems.find(it => it.name.toLowerCase() === p)
+  if (found) return found
+  // Inventory name includes produto token (e.g. "100K" inside "PLACA 100K")
+  found = invItems.find(it => it.name.toLowerCase().includes(p))
+  if (found) return found
+  // Produto includes inventory name token
+  found = invItems.find(it => p.includes(it.name.toLowerCase()))
+  return found
 }
 
 const TABS = ['Itens Internos', 'Premiações', 'Integrações'];
 
-const AWARD_STATUS_COLORS: Record<string, string> = {
-  'Pendente':    'var(--orange)',
-  'Em Trânsito': 'var(--action)',
-  'Enviado':     'var(--action)',
-  'Entregue':    'var(--green)',
-  'Cancelado':   'var(--red)',
-};
-
 export default function EstoquePage() {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
-  
   useEffect(() => { if (!loading && !user) navigate('/login'); }, [user, loading, navigate]);
   if (loading || !user) return null;
   return <EstoqueContent />;
@@ -68,14 +77,18 @@ function EstoqueContent() {
   const [searchItems, setSearchItems] = useState('');
 
   // ── Submissions (Premiações / Logística) ──────────────────────────────────
-  const [submissions, setSubmissions]       = useState<Submission[]>([]);
-  const [subSearch, setSubSearch]           = useState('');
+  const [submissions, setSubmissions]         = useState<Submission[]>([]);
+  const [subSearch, setSubSearch]             = useState('');
   const [subStatusFilter, setSubStatusFilter] = useState('Todos');
-  const [subDeleteId, setSubDeleteId]       = useState<string | null>(null);
-  const [subEditRow, setSubEditRow]         = useState<Submission | null>(null);
-  const [subEditData, setSubEditData]       = useState<Record<string, string>>({});
-  const [subEditStatus, setSubEditStatus]   = useState('Pendente');
-  const [subIsSaving, setSubIsSaving]       = useState(false);
+  const [subShowNoStock, setSubShowNoStock]   = useState(false);
+  const [subDeleteId, setSubDeleteId]         = useState<string | null>(null);
+  const [subEditRow, setSubEditRow]           = useState<Submission | null>(null);
+  const [subEditData, setSubEditData]         = useState<Record<string, string>>({});
+  const [subEditStatus, setSubEditStatus]     = useState('Pendente');
+  const [subEditPremioId, setSubEditPremioId] = useState('');
+  const [subEditExtras, setSubEditExtras]     = useState<ExtraItem[]>([]);
+  const [subEditExtraSelect, setSubEditExtraSelect] = useState('');
+  const [subIsSaving, setSubIsSaving]         = useState(false);
 
   // ── Fetch ──────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -95,18 +108,17 @@ function EstoqueContent() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ── Inventory CRUD ─────────────────────────────────────────────────────────
   function openNew() {
     setEditItem(null);
     setForm({ name: '', category: '', qty: '', unit: '' });
     setModal(true);
   }
-
   function openEdit(item: DbItem) {
     setEditItem(item);
     setForm({ name: item.name, category: item.category, qty: String(item.qty), unit: item.unit });
     setModal(true);
   }
-
   async function saveItem() {
     if (!form.name || !form.qty) return;
     setIsSaving(true);
@@ -127,7 +139,6 @@ function EstoqueContent() {
     }
     setModal(false);
   }
-
   async function deleteItem(id: string) {
     const { error } = await supabase.from('inventory').delete().eq('id', id);
     if (error) { toast(error.message, 'error'); return; }
@@ -135,7 +146,30 @@ function EstoqueContent() {
     toast('Item removido', 'info');
   }
 
-  // ── Submission actions ───────────────────────────────────────────────────
+  // ── Submission helpers ─────────────────────────────────────────────────────
+  /** Returns the matched DbItem for a submission (via _premio_id or fuzzy name match) */
+  function getSubInvItem(sub: Submission): DbItem | undefined {
+    if (sub.data._premio_id) return items.find(it => it.id === sub.data._premio_id)
+    return matchInventoryItem(extractProduto(sub.data), items)
+  }
+
+  // ── Demand analysis (memoized) ─────────────────────────────────────────────
+  const demandMap = useMemo(() => {
+    const map = new Map<string, number>() // inventory id → pending count
+    submissions.filter(s => s.status === 'Pendente').forEach(s => {
+      const inv = getSubInvItem(s)
+      if (inv) map.set(inv.id, (map.get(inv.id) || 0) + 1)
+    })
+    return map
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [submissions, items])
+
+  const criticalItems = useMemo(
+    () => items.filter(it => (demandMap.get(it.id) || 0) > it.qty),
+    [items, demandMap]
+  )
+
+  // ── Submission actions ─────────────────────────────────────────────────────
   async function updateSubStatus(id: string, status: string) {
     const { error } = await supabase.from('form_submissions').update({ status }).eq('id', id);
     if (error) { toast(error.message, 'error'); return; }
@@ -147,7 +181,6 @@ function EstoqueContent() {
     const { error } = await supabase.from('form_submissions').delete().eq('id', id);
     if (error) { toast(error.message, 'error'); return; }
     setSubmissions(p => p.filter(s => s.id !== id));
-    // Decrement response counter on parent form
     if (sub) {
       const { data: f } = await supabase.from('forms').select('responses').eq('id', sub.form_id).single();
       if (f) supabase.from('forms').update({ responses: Math.max(0, (f.responses || 1) - 1) }).eq('id', sub.form_id);
@@ -158,21 +191,73 @@ function EstoqueContent() {
 
   function openSubEdit(row: Submission) {
     setSubEditRow(row);
-    setSubEditData({ ...row.data });
     setSubEditStatus(row.status);
+    // Separate internal keys from editable data
+    const { _premio_id, _extras, ...editableData } = row.data;
+    setSubEditData(editableData);
+    setSubEditPremioId(_premio_id || '');
+    // Parse extras list
+    let extras: ExtraItem[] = [];
+    if (_extras) {
+      try {
+        const ids = JSON.parse(_extras) as string[];
+        extras = ids.map(id => {
+          const inv = items.find(it => it.id === id);
+          return inv ? { id, name: inv.name } : null;
+        }).filter(Boolean) as ExtraItem[];
+      } catch { /* ignore */ }
+    }
+    setSubEditExtras(extras);
+    setSubEditExtraSelect('');
   }
 
   async function saveSubEdit() {
     if (!subEditRow) return;
     setSubIsSaving(true);
+
+    // Build data payload (include internal tracking fields)
+    const newData: Record<string, string> = { ...subEditData };
+    if (subEditPremioId) newData._premio_id = subEditPremioId;
+    if (subEditExtras.length > 0) newData._extras = JSON.stringify(subEditExtras.map(e => e.id));
+
     const { error } = await supabase.from('form_submissions')
-      .update({ data: subEditData, status: subEditStatus })
+      .update({ data: newData, status: subEditStatus })
       .eq('id', subEditRow.id);
     if (error) { toast(error.message, 'error'); setSubIsSaving(false); return; }
-    setSubmissions(p => p.map(s => s.id === subEditRow.id ? { ...s, data: subEditData, status: subEditStatus } : s));
+
+    // Decrement inventory when transitioning from Pendente → Em Trânsito / Entregue
+    const wasNotDispatched = subEditRow.status === 'Pendente';
+    const nowDispatched    = subEditStatus === 'Em Trânsito' || subEditStatus === 'Entregue';
+    if (wasNotDispatched && nowDispatched) {
+      const toDecrement: string[] = [];
+      if (subEditPremioId) toDecrement.push(subEditPremioId);
+      subEditExtras.forEach(e => toDecrement.push(e.id));
+
+      for (const itemId of toDecrement) {
+        const inv = items.find(it => it.id === itemId);
+        if (inv && inv.qty > 0) {
+          void (async () => {
+            await supabase.from('inventory').update({ qty: inv.qty - 1 }).eq('id', itemId);
+          })();
+          setItems(p => p.map(it => it.id === itemId ? { ...it, qty: Math.max(0, it.qty - 1) } : it));
+        }
+      }
+      if (toDecrement.length > 0) toast('Estoque decrementado automaticamente.', 'info');
+    }
+
+    setSubmissions(p => p.map(s => s.id === subEditRow.id ? { ...s, data: newData, status: subEditStatus } : s));
     setSubEditRow(null);
     setSubIsSaving(false);
     toast('Envio atualizado!', 'success');
+  }
+
+  function addExtra() {
+    if (!subEditExtraSelect) return;
+    if (subEditExtras.some(e => e.id === subEditExtraSelect)) return;
+    const inv = items.find(it => it.id === subEditExtraSelect);
+    if (!inv) return;
+    setSubEditExtras(p => [...p, { id: inv.id, name: inv.name }]);
+    setSubEditExtraSelect('');
   }
 
   if (isLoading) {
@@ -200,76 +285,72 @@ function EstoqueContent() {
 
         <PillTabs tabs={TABS} active={tab} onChange={setTab} />
 
-        {/* Itens Internos */}
+        {/* ── Itens Internos ───────────────────────────────────────────────── */}
         {tab === 'Itens Internos' && (
           <div style={{ marginTop: 20 }}>
             <div style={{ position: 'relative', marginBottom: 14 }}>
               <Search size={15} color="var(--text2)" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
-              <input
-                className="inp"
-                value={searchItems}
-                onChange={e => setSearchItems(e.target.value)}
+              <input className="inp" value={searchItems} onChange={e => setSearchItems(e.target.value)}
                 placeholder="Buscar produto..."
-                style={{ paddingLeft: 36, width: '100%', boxSizing: 'border-box', maxWidth: 360 }}
-              />
+                style={{ paddingLeft: 36, width: '100%', boxSizing: 'border-box', maxWidth: 360 }} />
             </div>
-          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, overflow: 'hidden' }}>
-            <div className="scroll-x">
-              <table className="tbl">
-                <thead>
-                  <tr><th>Item</th><th>Categoria</th><th>Quantidade</th><th>Unidade</th><th>Ações</th></tr>
-                </thead>
-                <tbody>
-                  {items.length === 0 && (
-                    <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--text2)', padding: 32 }}>
-                      Nenhum item no estoque.
-                    </td></tr>
-                  )}
-                  {items.filter(it =>
-                    !searchItems.trim() ||
-                    it.name.toLowerCase().includes(searchItems.toLowerCase()) ||
-                    it.category.toLowerCase().includes(searchItems.toLowerCase())
-                  ).length === 0 && searchItems.trim() && (
-                    <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--text2)', padding: 32, fontSize: 13 }}>
-                      Nenhum resultado para "{searchItems}".
-                    </td></tr>
-                  )}
-                  {items.filter(it =>
-                    !searchItems.trim() ||
-                    it.name.toLowerCase().includes(searchItems.toLowerCase()) ||
-                    it.category.toLowerCase().includes(searchItems.toLowerCase())
-                  ).map(it => (
-                    <tr key={it.id}>
-                      <td style={{ fontWeight: 600 }}>{it.name}</td>
-                      <td><Badge label={it.category || '—'} color="var(--action)" /></td>
-                      <td>
-                        <span style={{ fontWeight: 700, color: it.qty <= 5 ? 'var(--red)' : it.qty <= 15 ? 'var(--orange)' : 'var(--green)' }}>
-                          {it.qty}
-                        </span>
-                      </td>
-                      <td style={{ color: 'var(--text2)', fontSize: 13 }}>{it.unit}</td>
-                      <td>
-                        <div style={{ display: 'flex', gap: 8 }}>
-                          <Button variant="ghost" size="sm" icon={Pencil} onClick={() => openEdit(it)}>Editar</Button>
-                          <Button variant="destructive" size="sm" icon={Trash2} onClick={() => deleteItem(it.id)}>Remover</Button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, overflow: 'hidden' }}>
+              <div className="scroll-x">
+                <table className="tbl">
+                  <thead>
+                    <tr><th>Item</th><th>Categoria</th><th>Quantidade</th><th>Unidade</th><th>Ações</th></tr>
+                  </thead>
+                  <tbody>
+                    {items.length === 0 && (
+                      <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--text2)', padding: 32 }}>
+                        Nenhum item no estoque.
+                      </td></tr>
+                    )}
+                    {items.filter(it =>
+                      !searchItems.trim() ||
+                      it.name.toLowerCase().includes(searchItems.toLowerCase()) ||
+                      it.category.toLowerCase().includes(searchItems.toLowerCase())
+                    ).map(it => (
+                      <tr key={it.id}>
+                        <td style={{ fontWeight: 600 }}>{it.name}</td>
+                        <td><Badge label={it.category || '—'} color="var(--action)" /></td>
+                        <td>
+                          <span style={{ fontWeight: 700, color: it.qty <= 5 ? 'var(--red)' : it.qty <= 15 ? 'var(--orange)' : 'var(--green)' }}>
+                            {it.qty}
+                          </span>
+                        </td>
+                        <td style={{ color: 'var(--text2)', fontSize: 13 }}>{it.unit}</td>
+                        <td>
+                          <div style={{ display: 'flex', gap: 8 }}>
+                            <Button variant="ghost" size="sm" icon={Pencil} onClick={() => openEdit(it)}>Editar</Button>
+                            <Button variant="destructive" size="sm" icon={Trash2} onClick={() => deleteItem(it.id)}>Remover</Button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </div>
           </div>
         )}
 
-        {/* Premiações / Logística */}
+        {/* ── Premiações / Logística ────────────────────────────────────────── */}
         {tab === 'Premiações' && (() => {
           const filtered = submissions.filter(s => {
-            const matchStatus = subStatusFilter === 'Todos' || s.status === subStatusFilter;
+            if (subStatusFilter !== 'Todos' && s.status !== subStatusFilter) return false;
+            if (subShowNoStock) {
+              const inv = getSubInvItem(s);
+              if (!inv || inv.qty > 0) return false;
+            }
             const term = subSearch.trim().toLowerCase();
-            const matchSearch = !term || Object.values(s.data).some(v => String(v).toLowerCase().includes(term));
-            return matchStatus && matchSearch;
+            if (term) {
+              const publicVals = Object.entries(s.data)
+                .filter(([k]) => !k.startsWith('_'))
+                .map(([, v]) => String(v).toLowerCase());
+              if (!publicVals.some(v => v.includes(term))) return false;
+            }
+            return true;
           });
 
           const actionBtn = (color: string): React.CSSProperties => ({
@@ -280,7 +361,7 @@ function EstoqueContent() {
           return (
             <div style={{ marginTop: 20 }}>
               {/* KPI cards */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 12, marginBottom: 24 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 12, marginBottom: 20 }}>
                 {SUB_STATUSES.map(s => (
                   <div key={s} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16, cursor: 'pointer',
                     outline: subStatusFilter === s ? `2px solid ${STATUS_COLORS[s]}` : 'none' }}
@@ -293,6 +374,45 @@ function EstoqueContent() {
                 ))}
               </div>
 
+              {/* ── Resumo Logístico (Alerta de Estoque Crítico) ──────────── */}
+              {criticalItems.length > 0 && (
+                <div style={{ background: 'color-mix(in srgb, var(--red) 8%, var(--bg-card))',
+                  border: '1px solid color-mix(in srgb, var(--red) 30%, var(--border))',
+                  borderRadius: 12, padding: 16, marginBottom: 20 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                    <AlertTriangle size={16} color="var(--red)" />
+                    <span style={{ fontWeight: 700, fontSize: 13, color: 'var(--red)' }}>
+                      Estoque Crítico — {criticalItems.length} {criticalItems.length === 1 ? 'item' : 'itens'} abaixo da demanda pendente
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {criticalItems.map(it => {
+                      const pending = demandMap.get(it.id) || 0;
+                      const faltam  = pending - it.qty;
+                      return (
+                        <div key={it.id} style={{ display: 'flex', alignItems: 'center', gap: 10,
+                          background: 'var(--bg-card)', borderRadius: 8, padding: '8px 12px',
+                          border: '1px solid var(--border)', fontSize: 13 }}>
+                          <Package size={14} color="var(--red)" style={{ flexShrink: 0 }} />
+                          <span style={{ fontWeight: 600, flex: 1 }}>{it.name}</span>
+                          <span style={{ color: 'var(--orange)', fontWeight: 600, fontSize: 12 }}>
+                            {pending} pendente{pending !== 1 ? 's' : ''}
+                          </span>
+                          <span style={{ color: 'var(--text2)', fontSize: 12 }}>|</span>
+                          <span style={{ color: it.qty === 0 ? 'var(--red)' : 'var(--orange)', fontWeight: 600, fontSize: 12 }}>
+                            {it.qty} em estoque
+                          </span>
+                          <span style={{ background: 'var(--red)', color: '#fff', borderRadius: 20,
+                            padding: '2px 8px', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }}>
+                            Faltam {faltam}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               {/* Toolbar */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
                 <div style={{ position: 'relative', flex: 1, maxWidth: 360 }}>
@@ -301,17 +421,26 @@ function EstoqueContent() {
                     placeholder="Buscar por nome, CPF, produto…"
                     style={{ paddingLeft: 36, width: '100%', boxSizing: 'border-box' }} />
                 </div>
-                {/* Status filter pills */}
-                <div style={{ display: 'flex', gap: 6 }}>
-                  {['Todos', ...SUB_STATUSES].map(s => (
+                {/* Status pills */}
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {(['Todos', ...SUB_STATUSES] as const).map(s => (
                     <button key={s} onClick={() => setSubStatusFilter(s)}
                       style={{ padding: '5px 12px', borderRadius: 20, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600,
                         background: subStatusFilter === s ? (STATUS_COLORS[s] || 'var(--action)') : 'var(--bg-card2)',
-                        color: subStatusFilter === s ? '#fff' : 'var(--text2)',
-                        transition: 'background .15s' }}>
+                        color: subStatusFilter === s ? '#fff' : 'var(--text2)', transition: 'background .15s' }}>
                       {s}
                     </button>
                   ))}
+                  {/* Sem estoque toggle */}
+                  <button onClick={() => setSubShowNoStock(p => !p)}
+                    style={{ padding: '5px 12px', borderRadius: 20, border: `1px solid ${subShowNoStock ? 'var(--red)' : 'transparent'}`,
+                      cursor: 'pointer', fontSize: 12, fontWeight: 600,
+                      background: subShowNoStock ? 'color-mix(in srgb, var(--red) 18%, var(--bg-card2))' : 'var(--bg-card2)',
+                      color: subShowNoStock ? 'var(--red)' : 'var(--text2)', transition: 'background .15s',
+                      display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <AlertTriangle size={11} />
+                    Sem estoque
+                  </button>
                 </div>
                 <span style={{ fontSize: 12, color: 'var(--text2)', whiteSpace: 'nowrap' }}>
                   {filtered.length} de {submissions.length}
@@ -319,68 +448,90 @@ function EstoqueContent() {
               </div>
 
               {/* Table */}
-              <div style={{ border: '1px solid var(--border)', borderRadius: 14, overflow: 'hidden', maxHeight: '60vh', overflowY: 'auto', overflowX: 'auto', boxShadow: '0 4px 24px rgba(0,0,0,0.2)' }}>
+              <div style={{ border: '1px solid var(--border)', borderRadius: 14, overflow: 'hidden',
+                maxHeight: '60vh', overflowY: 'auto', overflowX: 'auto',
+                boxShadow: '0 4px 24px rgba(0,0,0,0.2)' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr>
                       {(['Cliente', 'Produto/Prêmio', 'Data', 'Status'] as const).map(h => (
-                        <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: 'var(--text2)',
-                          textTransform: 'uppercase', letterSpacing: '.06em', whiteSpace: 'nowrap',
+                        <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontSize: 11, fontWeight: 700,
+                          color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.06em', whiteSpace: 'nowrap',
                           background: 'var(--bg-card)', position: 'sticky', top: 0, zIndex: 10,
                           borderBottom: '1px solid var(--border)', backdropFilter: 'blur(8px)' }}>{h}</th>
                       ))}
-                      <th style={{ padding: '10px 16px', textAlign: 'right', fontSize: 11, fontWeight: 700, color: 'var(--text2)',
-                        textTransform: 'uppercase', letterSpacing: '.06em', background: 'var(--bg-card)',
-                        position: 'sticky', top: 0, zIndex: 10, borderBottom: '1px solid var(--border)',
-                        backdropFilter: 'blur(8px)', whiteSpace: 'nowrap' }}>Ações</th>
+                      <th style={{ padding: '10px 16px', textAlign: 'right', fontSize: 11, fontWeight: 700,
+                        color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.06em',
+                        background: 'var(--bg-card)', position: 'sticky', top: 0, zIndex: 10,
+                        borderBottom: '1px solid var(--border)', backdropFilter: 'blur(8px)', whiteSpace: 'nowrap' }}>Ações</th>
                     </tr>
                   </thead>
                   <tbody>
                     {filtered.length === 0 && (
                       <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--text2)', padding: 40, fontSize: 13 }}>
-                        {subSearch || subStatusFilter !== 'Todos' ? `Nenhum resultado encontrado.` : 'Nenhum envio registrado.'}
+                        {subSearch || subStatusFilter !== 'Todos' || subShowNoStock
+                          ? 'Nenhum resultado encontrado.'
+                          : 'Nenhum envio registrado.'}
                       </td></tr>
                     )}
-                    {filtered.map((row, i) => (
-                      <tr key={row.id}
-                        style={{ background: i % 2 === 0 ? 'var(--bg-card)' : 'var(--bg-card2)', transition: 'background .15s' }}
-                        onMouseEnter={e => (e.currentTarget.style.background = 'color-mix(in srgb, var(--action) 5%, var(--bg-card2))')}
-                        onMouseLeave={e => (e.currentTarget.style.background = i % 2 === 0 ? 'var(--bg-card)' : 'var(--bg-card2)')}
-                      >
-                        <td style={{ padding: '11px 16px', fontSize: 13, fontWeight: 600, borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
-                          {extractNome(row.data)}
-                        </td>
-                        <td style={{ padding: '11px 16px', fontSize: 13, borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
-                          {extractProduto(row.data)}
-                        </td>
-                        <td style={{ padding: '11px 16px', fontSize: 13, color: 'var(--text2)', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
-                          {new Date(row.submitted_at).toLocaleDateString('pt-BR')}
-                        </td>
-                        <td style={{ padding: '11px 16px', borderBottom: '1px solid var(--border)' }}>
-                          <select value={row.status}
-                            onChange={e => updateSubStatus(row.id, e.target.value)}
-                            style={{ background: `color-mix(in srgb, ${STATUS_COLORS[row.status] || 'var(--text2)'} 18%, var(--bg-card2))`,
-                              color: STATUS_COLORS[row.status] || 'var(--text2)', border: `1px solid ${STATUS_COLORS[row.status] || 'var(--border)'}`,
-                              borderRadius: 20, padding: '3px 10px', fontSize: 12, fontWeight: 700, cursor: 'pointer', outline: 'none' }}>
-                            {SUB_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
-                          </select>
-                        </td>
-                        <td style={{ padding: '11px 16px', borderBottom: '1px solid var(--border)', textAlign: 'right' }}>
-                          <div style={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
-                            <button onClick={() => openSubEdit(row)} title="Editar" style={actionBtn('var(--action)')}
-                              onMouseEnter={e => (e.currentTarget.style.background = 'color-mix(in srgb, var(--action) 12%, transparent)')}
-                              onMouseLeave={e => (e.currentTarget.style.background = 'none')}>
-                              <Pencil size={13} />
-                            </button>
-                            <button onClick={() => setSubDeleteId(row.id)} title="Excluir" style={actionBtn('var(--red)')}
-                              onMouseEnter={e => (e.currentTarget.style.background = 'color-mix(in srgb, var(--red) 12%, transparent)')}
-                              onMouseLeave={e => (e.currentTarget.style.background = 'none')}>
-                              <Trash2 size={13} />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                    {filtered.map((row, i) => {
+                      const invItem  = getSubInvItem(row);
+                      const noStock  = invItem ? invItem.qty === 0 : false;
+                      const prodName = invItem ? invItem.name : extractProduto(row.data);
+                      const rowBg    = noStock
+                        ? (i % 2 === 0 ? 'color-mix(in srgb, var(--red) 6%, var(--bg-card))' : 'color-mix(in srgb, var(--red) 10%, var(--bg-card2))')
+                        : (i % 2 === 0 ? 'var(--bg-card)' : 'var(--bg-card2)');
+
+                      return (
+                        <tr key={row.id} style={{ background: rowBg, transition: 'background .15s' }}
+                          onMouseEnter={e => (e.currentTarget.style.background = noStock
+                            ? 'color-mix(in srgb, var(--red) 14%, var(--bg-card2))'
+                            : 'color-mix(in srgb, var(--action) 5%, var(--bg-card2))')}
+                          onMouseLeave={e => (e.currentTarget.style.background = rowBg)}>
+                          <td style={{ padding: '11px 16px', fontSize: 13, fontWeight: 600, borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
+                            {extractNome(row.data)}
+                          </td>
+                          <td style={{ padding: '11px 16px', fontSize: 13, borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <span>{prodName}</span>
+                              {noStock && (
+                                <span style={{ background: 'var(--red)', color: '#fff', fontSize: 10,
+                                  fontWeight: 700, padding: '1px 7px', borderRadius: 20, whiteSpace: 'nowrap' }}>
+                                  SEM ESTOQUE
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td style={{ padding: '11px 16px', fontSize: 13, color: 'var(--text2)', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
+                            {new Date(row.submitted_at).toLocaleDateString('pt-BR')}
+                          </td>
+                          <td style={{ padding: '11px 16px', borderBottom: '1px solid var(--border)' }}>
+                            <select value={row.status} onChange={e => updateSubStatus(row.id, e.target.value)}
+                              style={{ background: `color-mix(in srgb, ${STATUS_COLORS[row.status] || 'var(--text2)'} 18%, var(--bg-card2))`,
+                                color: STATUS_COLORS[row.status] || 'var(--text2)',
+                                border: `1px solid ${STATUS_COLORS[row.status] || 'var(--border)'}`,
+                                borderRadius: 20, padding: '3px 10px', fontSize: 12, fontWeight: 700,
+                                cursor: 'pointer', outline: 'none' }}>
+                              {SUB_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                            </select>
+                          </td>
+                          <td style={{ padding: '11px 16px', borderBottom: '1px solid var(--border)', textAlign: 'right' }}>
+                            <div style={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
+                              <button onClick={() => openSubEdit(row)} title="Editar" style={actionBtn('var(--action)')}
+                                onMouseEnter={e => (e.currentTarget.style.background = 'color-mix(in srgb, var(--action) 12%, transparent)')}
+                                onMouseLeave={e => (e.currentTarget.style.background = 'none')}>
+                                <Pencil size={13} />
+                              </button>
+                              <button onClick={() => setSubDeleteId(row.id)} title="Excluir" style={actionBtn('var(--red)')}
+                                onMouseEnter={e => (e.currentTarget.style.background = 'color-mix(in srgb, var(--red) 12%, transparent)')}
+                                onMouseLeave={e => (e.currentTarget.style.background = 'none')}>
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -388,7 +539,7 @@ function EstoqueContent() {
           );
         })()}
 
-        {/* Integrações */}
+        {/* ── Integrações ───────────────────────────────────────────────────── */}
         {tab === 'Integrações' && (
           <div style={{ marginTop: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 24 }}>
@@ -455,7 +606,7 @@ function EstoqueContent() {
           </div>
         )}
 
-        {/* Modal Item */}
+        {/* ── Modal: Novo/Editar Item ────────────────────────────────────────── */}
         <Modal open={modal} onClose={() => setModal(false)} title={editItem ? 'Editar Item' : 'Novo Item'}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <Field label="Nome do Item">
@@ -474,12 +625,14 @@ function EstoqueContent() {
             </div>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
               <Button variant="secondary" onClick={() => setModal(false)}>Cancelar</Button>
-              <Button onClick={saveItem} disabled={isSaving}>{editItem ? (isSaving ? 'Salvando…' : 'Salvar') : (isSaving ? 'Adicionando…' : 'Adicionar')}</Button>
+              <Button onClick={saveItem} disabled={isSaving}>
+                {editItem ? (isSaving ? 'Salvando…' : 'Salvar') : (isSaving ? 'Adicionando…' : 'Adicionar')}
+              </Button>
             </div>
           </div>
         </Modal>
 
-        {/* Modal — Excluir Envio */}
+        {/* ── Modal: Excluir Envio ───────────────────────────────────────────── */}
         <Modal open={subDeleteId !== null} onClose={() => setSubDeleteId(null)} title="Excluir Envio">
           <div style={{ fontSize: 14, color: 'var(--text2)', marginBottom: 20 }}>
             Esta ação é irreversível. O envio será removido e o contador de respostas do formulário será decrementado.
@@ -490,20 +643,83 @@ function EstoqueContent() {
           </div>
         </Modal>
 
-        {/* Modal — Editar Envio */}
+        {/* ── Modal: Editar Envio (com gestão de estoque) ───────────────────── */}
         <Modal open={subEditRow !== null} onClose={() => setSubEditRow(null)} title="Editar Dados do Envio">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {/* Status */}
             <Field label="Status">
               <select className="inp" value={subEditStatus} onChange={e => setSubEditStatus(e.target.value)}
                 style={{ color: STATUS_COLORS[subEditStatus] || 'var(--text)', fontWeight: 700 }}>
                 {SUB_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
               </select>
             </Field>
+
+            {/* Prêmio Principal — dropdown do inventário */}
+            <Field label="Prêmio Principal">
+              <select className="inp" value={subEditPremioId} onChange={e => setSubEditPremioId(e.target.value)}>
+                <option value="">— Selecione um item do estoque —</option>
+                {items.map(it => (
+                  <option key={it.id} value={it.id}>
+                    {it.name}{it.qty === 0 ? ' [SEM ESTOQUE]' : ` (${it.qty} disponíveis)`}
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            {/* Itens Extras */}
+            <Field label="Itens Extras">
+              <div style={{ display: 'flex', gap: 8 }}>
+                <select className="inp" value={subEditExtraSelect} onChange={e => setSubEditExtraSelect(e.target.value)} style={{ flex: 1 }}>
+                  <option value="">Adicionar item extra…</option>
+                  {items.filter(it => !subEditExtras.some(e => e.id === it.id) && it.id !== subEditPremioId).map(it => (
+                    <option key={it.id} value={it.id}>
+                      {it.name}{it.qty === 0 ? ' [SEM ESTOQUE]' : ` (${it.qty})`}
+                    </option>
+                  ))}
+                </select>
+                <button onClick={addExtra} disabled={!subEditExtraSelect}
+                  style={{ padding: '0 14px', background: 'var(--action)', color: '#fff', border: 'none',
+                    borderRadius: 8, cursor: subEditExtraSelect ? 'pointer' : 'not-allowed', fontWeight: 700, fontSize: 13,
+                    opacity: subEditExtraSelect ? 1 : 0.5 }}>
+                  +
+                </button>
+              </div>
+              {subEditExtras.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+                  {subEditExtras.map(e => (
+                    <div key={e.id} style={{ display: 'flex', alignItems: 'center', gap: 5,
+                      background: 'color-mix(in srgb, var(--action) 12%, var(--bg-card2))',
+                      border: '1px solid color-mix(in srgb, var(--action) 30%, var(--border))',
+                      borderRadius: 20, padding: '3px 10px', fontSize: 12, fontWeight: 600 }}>
+                      <span>{e.name}</span>
+                      <button onClick={() => setSubEditExtras(p => p.filter(x => x.id !== e.id))}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+                          display: 'flex', alignItems: 'center', color: 'var(--text2)' }}>
+                        <X size={11} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Field>
+
+            {/* Campos do formulário */}
             {Object.keys(subEditData).map(key => (
               <Field key={key} label={key}>
                 <input className="inp" value={subEditData[key] || ''} onChange={e => setSubEditData(p => ({ ...p, [key]: e.target.value }))} />
               </Field>
             ))}
+
+            {/* Aviso de decremento */}
+            {subEditRow?.status === 'Pendente' && (subEditStatus === 'Em Trânsito' || subEditStatus === 'Entregue') && (
+              <div style={{ background: 'color-mix(in srgb, var(--orange) 10%, var(--bg-card2))',
+                border: '1px solid color-mix(in srgb, var(--orange) 30%, var(--border))',
+                borderRadius: 8, padding: '10px 12px', fontSize: 12, color: 'var(--orange)', fontWeight: 600,
+                display: 'flex', alignItems: 'center', gap: 8 }}>
+                <AlertTriangle size={14} />
+                O estoque será decrementado automaticamente ao salvar.
+              </div>
+            )}
           </div>
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 20 }}>
             <Button variant="secondary" onClick={() => setSubEditRow(null)}>Cancelar</Button>
