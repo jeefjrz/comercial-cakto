@@ -172,15 +172,32 @@ function AtivacoesContent({ isAdmin }: { isAdmin: boolean }) {
       toast('Ativação atualizada!', 'success')
       setModalEdit(null)
     } else {
+      const emailSanitized = form.email.trim().toLowerCase()
+
+      // Pre-check: block duplicate email
+      const { data: existing } = await supabase
+        .from('activations').select('id').eq('email', emailSanitized).maybeSingle()
+      if (existing) {
+        toast('Este e-mail já possui uma ativação cadastrada.', 'error')
+        setIsSaving(false)
+        return
+      }
+
       const time = new Date().toTimeString().slice(0, 5)
       const row = {
-        client: capitalize(form.client), email: form.email, phone: form.phone || null,
+        client: capitalize(form.client), email: emailSanitized, phone: form.phone || null,
         channel: form.channel as ActivationChannel, responsible: form.responsible,
         date: form.date, time,
       }
       const { data, error } = await supabase.from('activations').insert(row).select().single()
       setIsSaving(false)
-      if (error) { toast(error.message, 'error'); return }
+      if (error) {
+        const msg = (error as { code?: string }).code === '23505'
+          ? 'Este e-mail já possui uma ativação cadastrada.'
+          : error.message
+        toast(msg, 'error')
+        return
+      }
       setActivations(p => [data as DbActivation, ...p])
       toast('Cliente ativado com sucesso!', 'success')
       setModalNew(false)

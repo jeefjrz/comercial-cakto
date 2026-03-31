@@ -145,6 +145,44 @@ export default function PublicForm({ customDomain }: Props) {
 
   const fields: FormField[] = Array.isArray(form?.fields) ? (form!.fields as FormField[]) : []
 
+  // ── Formatters ────────────────────────────────────────────────────────────
+  function applyMask(raw: string, field: FormField): string {
+    const label = field.label.toLowerCase()
+
+    if (field.type === 'CPF') {
+      const d = raw.replace(/\D/g, '').slice(0, 11)
+      return d
+        .replace(/(\d{3})(\d)/, '$1.$2')
+        .replace(/(\d{3})\.(\d{3})(\d)/, '$1.$2.$3')
+        .replace(/(\d{3})\.(\d{3})\.(\d{3})(\d)/, '$1.$2.$3-$4')
+    }
+
+    if (field.type === 'CEP') {
+      const d = raw.replace(/\D/g, '').slice(0, 8)
+      return d
+        .replace(/(\d{2})(\d)/, '$1.$2')
+        .replace(/(\d{2})\.(\d{3})(\d)/, '$1.$2-$3')
+    }
+
+    if (field.type === 'Telefone') {
+      const d = raw.replace(/\D/g, '').slice(0, 13)
+      if (!d) return ''
+      let r = '+' + d.slice(0, 2)
+      if (d.length > 2)  r += ' (' + d.slice(2, 4)
+      if (d.length > 4)  r += ') ' + d.slice(4, 9)
+      if (d.length > 9)  r += '-' + d.slice(9, 13)
+      return r
+    }
+
+    if (field.type === 'Email') return raw.toLowerCase()
+
+    if (/nome|bairro|cidade/.test(label)) {
+      return raw.toLowerCase().replace(/(?:^|\s)\S/g, a => a.toUpperCase())
+    }
+
+    return raw
+  }
+
   const progressPercent = useMemo(() => {
     if (fields.length === 0) return 0
     const filled = fields.filter(f => values[String(f.id)]?.trim()).length
@@ -158,6 +196,14 @@ export default function PublicForm({ customDomain }: Props) {
     const missing = fields.filter(f => f.required && !values[String(f.id)]?.trim())
     if (missing.length) {
       setError(`Preencha os campos obrigatórios: ${missing.map(f => f.label).join(', ')}`)
+      return
+    }
+
+    // Validate email format
+    const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    const invalidEmail = fields.find(f => f.type === 'Email' && values[String(f.id)] && !emailRe.test(values[String(f.id)]))
+    if (invalidEmail) {
+      setError(`E-mail inválido: ${values[String(invalidEmail.id)]}`)
       return
     }
 
@@ -209,9 +255,11 @@ export default function PublicForm({ customDomain }: Props) {
       borderRadius: 10, color: fieldTextColor, fontSize: 15, outline: 'none', fontFamily: 'inherit',
     }
 
+    const set = (raw: string) => setValues(p => ({ ...p, [id]: applyMask(raw, f) }))
+
     if (f.type === 'Textarea') return (
       <textarea style={{ ...base, minHeight: 100, resize: 'vertical' }} placeholder={f.placeholder}
-        value={values[id] || ''} onChange={e => setValues(p => ({ ...p, [id]: e.target.value }))} />
+        value={values[id] || ''} onChange={e => set(e.target.value)} />
     )
 
     if (f.type === 'Select') {
@@ -229,8 +277,16 @@ export default function PublicForm({ customDomain }: Props) {
 
     const inputType = f.type === 'Email' ? 'email' : f.type === 'Data' ? 'date' : 'text'
     return (
-      <input type={inputType} style={base} placeholder={f.placeholder}
-        value={values[id] || ''} onChange={e => setValues(p => ({ ...p, [id]: e.target.value }))} />
+      <input
+        type={inputType}
+        style={base}
+        placeholder={f.placeholder}
+        value={values[id] || ''}
+        onChange={e => set(e.target.value)}
+        onFocus={() => {
+          if (f.type === 'Telefone' && !values[id]) setValues(p => ({ ...p, [id]: '+55 ' }))
+        }}
+      />
     )
   }
 
