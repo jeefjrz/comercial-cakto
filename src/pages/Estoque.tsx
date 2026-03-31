@@ -54,7 +54,7 @@ function extractMeta(data: Record<string, string>): string {
 }
 
 function metaBadgeStyle(meta: string): React.CSSProperties {
-  const m = meta.toLowerCase().replace(/\s/g, '')
+  const m = (meta ?? '').toLowerCase().replace(/\s/g, '')
   const bg =
     m.includes('1m')   || m.includes('1.000.000') ? '#b45309' :   // gold
     m.includes('500k') || m.includes('500.000')   ? '#7c3aed' :   // purple
@@ -67,7 +67,7 @@ function metaBadgeStyle(meta: string): React.CSSProperties {
 }
 
 function trackingUrl(code: string, carrier: string): string {
-  const c = carrier.toLowerCase()
+  const c = (carrier ?? '').toLowerCase()
   if (c.includes('correios')) return `https://rastreamento.correios.com.br/app/index.php?objetos=${code}`
   // Default: Melhor Envio / generic
   return `https://melhorrastreio.com.br/rastreio/${code}`
@@ -75,7 +75,7 @@ function trackingUrl(code: string, carrier: string): string {
 
 /** Returns package dimensions/weight based on meta milestone */
 function getDimensions(meta: string) {
-  const m = meta.toLowerCase().replace(/[\s.]/g, '')
+  const m = (meta ?? '').toLowerCase().replace(/[\s.]/g, '')
   if (m.includes('10k'))  return { width: 8,  height: 4,  length: 8,  weight: 0.1 }
   if (m.includes('100k') || m.includes('250k')) return { width: 30, height: 18, length: 35, weight: 3.0 }
   if (m.includes('500k')) return { width: 32, height: 4,  length: 43, weight: 3.8 }
@@ -137,6 +137,7 @@ function normalizePhone(raw: string): string {
 }
 
 function normalizeStateAbbr(raw: string): string {
+  if (!raw) return ''
   const t = raw.trim().toLowerCase()
   if (t.length === 2) return raw.trim().toUpperCase()
   return STATE_MAP[t] ?? raw.trim().toUpperCase().slice(0, 2)
