@@ -466,11 +466,12 @@ function EstoqueContent() {
     const r   = extractRecipient(row.data)
     const cpf = Object.values(row.data).find(v => /^\d{3}\.?\d{3}\.?\d{3}-?\d{2}$/.test(String(v)) || /^\d{11}$/.test(String(v))) ?? ''
     const payload = {
-      nome:     extractNome(row.data),
-      telefone: r.phone,
-      cpf:      String(cpf).replace(/\D/g, ''),
-      email:    r.email,
-      rastreio: trackingCode,
+      nome:          extractNome(row.data),
+      telefone:      r.phone,
+      cpf:           String(cpf).replace(/\D/g, ''),
+      email:         r.email,
+      rastreio:      trackingCode,
+      link_rastreio: `https://melhorrastreio.com.br/rastreio/${trackingCode}`,
     }
     try {
       await fetch(webhookWa, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
