@@ -360,50 +360,69 @@ function EstoqueContent() {
       options: { insurance_value: 0, receipt: false, own_hand: false, reverse: false, non_commercial: true },
     }
 
-    const { data: fnData, error } = await supabase.functions.invoke('me-proxy', {
+    const { data: fnData, error: fnErr } = await supabase.functions.invoke('me-proxy', {
       body: { action: 'cart', payload },
     })
     setCartingId(null)
 
-    if (error || fnData?.error || fnData?.errors) {
-      const msg = fnData?.message || fnData?.errors || error?.message || 'Erro ao adicionar ao carrinho'
-      toast(String(msg), 'error')
+    if (fnErr) {
+      console.error('[addToCart] invoke error:', fnErr)
+      toast(fnErr.message || 'Erro ao chamar Edge Function', 'error')
+      return
+    }
+    if (fnData?.error || fnData?.errors || fnData?.message) {
+      const msg = fnData?.message || JSON.stringify(fnData?.errors ?? fnData?.error)
+      console.error('[addToCart] ME API error:', fnData)
+      toast(`ME API: ${msg}`, 'error')
       return
     }
 
-    const cartId = fnData?.id ?? fnData?.data?.id ?? ''
-    if (!cartId) { toast('ID do carrinho não retornado pela API', 'error'); return }
+    const cartId: string = fnData?.id ?? ''
+    if (!cartId) {
+      console.error('[addToCart] resposta sem id:', fnData)
+      toast('ME API não retornou ID do carrinho', 'error')
+      return
+    }
 
+    // Só persiste APÓS confirmação real da ME API
     const { error: dbErr } = await supabase.from('form_submissions')
-      .update({ me_cart_id: String(cartId), status: 'No Carrinho' })
+      .update({ me_cart_id: cartId, status: 'No Carrinho' })
       .eq('id', row.id)
     if (dbErr) { toast(dbErr.message, 'error'); return }
 
     setSubmissions(p => p.map(s => s.id === row.id
-      ? { ...s, me_cart_id: String(cartId), status: 'No Carrinho' }
+      ? { ...s, me_cart_id: cartId, status: 'No Carrinho' }
       : s))
-    toast(`Adicionado ao carrinho ME (#${cartId})`, 'success')
+    toast(`Adicionado ao carrinho ME — ID: ${cartId}`, 'success')
   }
 
   async function syncTracking(row: Submission) {
     if (!row.me_cart_id) { toast('Sem me_cart_id — gere no carrinho primeiro.', 'error'); return }
     setSyncingId(row.id)
 
-    const { data: fnData, error } = await supabase.functions.invoke('me-proxy', {
+    const { data: fnData, error: fnErr } = await supabase.functions.invoke('me-proxy', {
       body: { action: 'tracking', payload: { id: row.me_cart_id } },
     })
     setSyncingId(null)
 
-    if (error || fnData?.error) {
-      toast(String(fnData?.message || error?.message || 'Erro ao buscar rastreio'), 'error')
+    if (fnErr) {
+      console.error('[syncTracking] invoke error:', fnErr)
+      toast(fnErr.message || 'Erro ao chamar Edge Function', 'error')
+      return
+    }
+    if (fnData?.error) {
+      console.error('[syncTracking] ME API error:', fnData)
+      toast(`ME API: ${fnData.message || fnData.error}`, 'error')
       return
     }
 
     // ME retorna objeto com chave = me_cart_id → { tracking: "..." }
     const code: string = fnData?.[row.me_cart_id]?.tracking ?? ''
+    console.log('[syncTracking] resposta ME:', fnData, '→ code:', code)
 
     if (!code) { toast('Etiqueta ainda não gerada/paga no Melhor Envio.', 'info'); return }
 
+    // Só persiste APÓS código real recebido
     const { error: dbErr } = await supabase.from('form_submissions')
       .update({ tracking_code: code, status: 'Em Trânsito' })
       .eq('id', row.id)
