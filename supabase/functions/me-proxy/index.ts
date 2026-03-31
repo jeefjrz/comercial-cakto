@@ -132,11 +132,14 @@ serve(async (req) => {
       const submissions: Array<{ id: string; data: Record<string, string>; me_cart_id: string; status: string }> =
         await subsRes.json()
 
-      // Logs de diagnóstico
-      const firstOrder = orders[0] as Record<string, unknown>
-      console.log('[sync-bulk] Exemplo ME doc:', sanitizeDoc((firstOrder?.to as Record<string, unknown>)?.document))
-      console.log('[sync-bulk] Exemplo DB data keys:', Object.keys(submissions[0]?.data ?? {}))
-      console.log('[sync-bulk] Exemplo DB data values (primeiros 3):', Object.values(submissions[0]?.data ?? {}).slice(0, 3))
+      // Amostras para debug
+      const sampleME  = (orders[0] as Record<string, unknown>)
+      const sampleDB  = submissions[0]
+      const sampleMEDoc = sanitizeDoc((sampleME?.to as Record<string, unknown>)?.document)
+      console.log('[sync-bulk] Exemplo ME doc (sanitized):', sampleMEDoc)
+      console.log('[sync-bulk] Exemplo DB row keys:', Object.keys(sampleDB ?? {}))
+      console.log('[sync-bulk] Exemplo DB data keys:', Object.keys(sampleDB?.data ?? {}))
+      console.log('[sync-bulk] Exemplo DB data values (primeiros 5):', Object.values(sampleDB?.data ?? {}).slice(0, 5))
       console.log(`[sync-bulk] ${orders.length} orders ME | ${submissions.length} submissões sem tracking no DB`)
 
       let updated = 0
@@ -181,6 +184,23 @@ serve(async (req) => {
       }
 
       console.log(`[sync-bulk] ${orders.length} orders ME → ${updated} matches atualizados`)
+
+      // Se nenhum match, devolve amostra para diagnóstico no frontend
+      if (updated === 0) {
+        return new Response(JSON.stringify({
+          updated: 0,
+          total: orders.length,
+          debug: {
+            meCPF:     sampleMEDoc,
+            meStatus:  String((sampleME as Record<string, unknown>)?.status ?? ''),
+            dbRowKeys: Object.keys(sampleDB ?? {}),
+            dbDataKeys: Object.keys(sampleDB?.data ?? {}),
+            dbDataValues: Object.values(sampleDB?.data ?? {}).slice(0, 5),
+            dbRowFull:  sampleDB,
+          },
+        }), { status: 200, headers: { ...CORS, 'Content-Type': 'application/json' } })
+      }
+
       return new Response(JSON.stringify({ updated, total: orders.length }), {
         status: 200, headers: { ...CORS, 'Content-Type': 'application/json' },
       })

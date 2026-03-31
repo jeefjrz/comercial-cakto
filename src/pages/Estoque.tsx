@@ -509,6 +509,10 @@ function EstoqueContent() {
       return
     }
 
+    if (fnData?.debug) {
+      console.log('🔥 ALERTA DE DEBUG sync-bulk:', fnData.debug)
+    }
+
     const { updated = 0, total = 0 } = fnData as { updated: number; total: number }
 
     // Re-fetch submissions to reflect DB changes
