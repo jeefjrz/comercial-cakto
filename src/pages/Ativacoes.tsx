@@ -214,8 +214,8 @@ function AtivacoesContent({ isAdmin }: { isAdmin: boolean }) {
     setModalDel(null)
   }
 
-  // ── Loading ───────────────────────────────────────────────────────────────
-  const FormFields = () => (
+  // ── Form fields JSX (variable, NOT a component — prevents unmount-on-rerender focus loss) ──
+  const formFieldsJSX = (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <Field label="Nome do Cliente" required>
         <input className="inp" value={form.client} onChange={setF('client')}
@@ -467,7 +467,7 @@ function AtivacoesContent({ isAdmin }: { isAdmin: boolean }) {
             <Button variant="secondary" onClick={() => { setModalNew(false); setForm({ ...EMPTY_FORM }) }}>Cancelar</Button>
             <Button onClick={save} disabled={isSaving}>{isSaving ? 'Salvando…' : 'Salvar'}</Button>
           </>}>
-          <FormFields />
+          {formFieldsJSX}
         </Modal>
 
         <Modal open={!!modalEdit} onClose={() => setModalEdit(null)} title="Editar Ativação" width={520}
@@ -475,7 +475,7 @@ function AtivacoesContent({ isAdmin }: { isAdmin: boolean }) {
             <Button variant="secondary" onClick={() => setModalEdit(null)}>Cancelar</Button>
             <Button onClick={save} disabled={isSaving}>{isSaving ? 'Salvando…' : 'Salvar'}</Button>
           </>}>
-          <FormFields />
+          {formFieldsJSX}
         </Modal>
 
         <Sheet open={!!sheetView} onClose={() => setSheetView(null)} title="Detalhes da Ativação">
