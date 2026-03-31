@@ -673,7 +673,71 @@ function FormEditor({ form, onBack, onSave, isSaving }: {
 }
 
 /* ───────── FormResponses ───────── */
+type Submission = { id: string; form_id: string; data: Record<string, string>; submitted_at: string }
+
 function FormResponses({ form, onBack }: { form: DbForm; onBack: () => void }) {
+  const toast = useToast();
+  const [rows, setRows]             = useState<Submission[]>([]);
+  const [isLoading, setIsLoading]   = useState(true);
+  const [deleteId, setDeleteId]     = useState<string | null>(null);
+  const [editRow, setEditRow]       = useState<Submission | null>(null);
+  const [editData, setEditData]     = useState<Record<string, string>>({});
+  const [isSaving, setIsSaving]     = useState(false);
+
+  useEffect(() => {
+    supabase
+      .from('form_submissions')
+      .select('id,form_id,data,submitted_at')
+      .eq('form_id', form.id)
+      .order('submitted_at', { ascending: false })
+      .then(({ data, error }) => {
+        if (error) toast(error.message, 'error');
+        if (data) setRows(data as Submission[]);
+        setIsLoading(false);
+      });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.id]);
+
+  // Dynamic column headers from first row's data keys
+  const columns = rows.length > 0 ? Object.keys(rows[0].data) : [];
+
+  async function handleDelete(id: string) {
+    const { error } = await supabase.from('form_submissions').delete().eq('id', id);
+    if (error) { toast(error.message, 'error'); return; }
+    setRows(p => p.filter(r => r.id !== id));
+    setDeleteId(null);
+    toast('Resposta excluída', 'info');
+  }
+
+  function openEdit(row: Submission) {
+    setEditRow(row);
+    setEditData({ ...row.data });
+  }
+
+  async function handleSaveEdit() {
+    if (!editRow) return;
+    setIsSaving(true);
+    const { error } = await supabase
+      .from('form_submissions')
+      .update({ data: editData })
+      .eq('id', editRow.id);
+    if (error) { toast(error.message, 'error'); setIsSaving(false); return; }
+    setRows(p => p.map(r => r.id === editRow.id ? { ...r, data: editData } : r));
+    setEditRow(null);
+    setIsSaving(false);
+    toast('Resposta atualizada', 'success');
+  }
+
+  const thStyle: React.CSSProperties = {
+    padding: '10px 14px', textAlign: 'left', fontSize: 12, fontWeight: 700,
+    color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.05em',
+    borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap', background: 'var(--bg-card)',
+  };
+  const tdStyle: React.CSSProperties = {
+    padding: '12px 14px', fontSize: 13, borderBottom: '1px solid var(--border)',
+    maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+  };
+
   return (
     <>
       <Header />
@@ -682,14 +746,86 @@ function FormResponses({ form, onBack }: { form: DbForm; onBack: () => void }) {
           <Button variant="ghost" icon={ChevronLeft} onClick={onBack}>Voltar</Button>
           <div>
             <h1 style={{ fontSize: 22, fontWeight: 800 }}>{form.name}</h1>
-            <div style={{ fontSize: 13, color: 'var(--text2)' }}>{form.responses} respostas registradas</div>
+            <div style={{ fontSize: 13, color: 'var(--text2)' }}>{rows.length} respostas</div>
           </div>
         </div>
-        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 48, textAlign: 'center', color: 'var(--text2)' }}>
-          <div style={{ fontSize: 14 }}>As respostas deste formulário são coletadas via webhook externo.</div>
-          <div style={{ fontSize: 13, marginTop: 8 }}>Integre com o Make, Zapier ou N8N para receber as submissões.</div>
-        </div>
+
+        {isLoading ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--text2)', padding: '48px 0', justifyContent: 'center' }}>
+            <Loader2 size={18} style={{ animation: 'spin 1s linear infinite' }} />
+            <span style={{ fontSize: 14 }}>Carregando respostas…</span>
+          </div>
+        ) : rows.length === 0 ? (
+          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 48, textAlign: 'center', color: 'var(--text2)' }}>
+            <div style={{ fontSize: 14 }}>Nenhuma resposta recebida ainda.</div>
+          </div>
+        ) : (
+          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'auto' }}>
+              <thead>
+                <tr>
+                  {columns.map(col => <th key={col} style={thStyle}>{col}</th>)}
+                  <th style={thStyle}>Data de Envio</th>
+                  <th style={{ ...thStyle, textAlign: 'right' }}>Ações</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(row => (
+                  <tr key={row.id} style={{ transition: 'background .15s' }}
+                    onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-card2)')}
+                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    {columns.map(col => (
+                      <td key={col} style={tdStyle} title={row.data[col] || '—'}>{row.data[col] || <span style={{ color: 'var(--text2)' }}>—</span>}</td>
+                    ))}
+                    <td style={{ ...tdStyle, whiteSpace: 'nowrap', color: 'var(--text2)' }}>
+                      {new Date(row.submitted_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    </td>
+                    <td style={{ ...tdStyle, textAlign: 'right' }}>
+                      <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                        <button onClick={() => openEdit(row)} title="Editar" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--action)', padding: 4 }}>
+                          <Pencil size={14} />
+                        </button>
+                        <button onClick={() => setDeleteId(row.id)} title="Excluir" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', padding: 4 }}>
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
+
+      {/* ── Delete confirm ── */}
+      <Modal open={deleteId !== null} onClose={() => setDeleteId(null)} title="Excluir Resposta">
+        <div style={{ fontSize: 14, color: 'var(--text2)', marginBottom: 20 }}>
+          Esta ação é irreversível. A resposta será removida permanentemente.
+        </div>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <Button variant="secondary" onClick={() => setDeleteId(null)}>Cancelar</Button>
+          <Button variant="destructive" icon={Trash2} onClick={() => handleDelete(deleteId!)}>Excluir</Button>
+        </div>
+      </Modal>
+
+      {/* ── Edit modal ── */}
+      <Modal open={editRow !== null} onClose={() => setEditRow(null)} title="Editar Resposta">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {Object.keys(editData).map(key => (
+            <Field key={key} label={key}>
+              <input className="inp" value={editData[key] || ''} onChange={e => setEditData(p => ({ ...p, [key]: e.target.value }))} />
+            </Field>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 20 }}>
+          <Button variant="secondary" onClick={() => setEditRow(null)}>Cancelar</Button>
+          <Button onClick={handleSaveEdit} disabled={isSaving}>{isSaving ? 'Salvando…' : 'Salvar'}</Button>
+        </div>
+      </Modal>
+
+      <style>{`@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}`}</style>
     </>
   );
 }
