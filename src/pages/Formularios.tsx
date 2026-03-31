@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { Plus, ChevronLeft, Pencil, Trash2, Eye, Copy, GripVertical, Settings, Link, Loader2, Globe, Image } from 'lucide-react';
+import { Plus, ChevronLeft, Pencil, Trash2, Eye, Copy, GripVertical, Settings, Link, Loader2, Globe, Image, Search } from 'lucide-react';
 import { useAuth } from '@/lib/authContext';
 import { Header } from '@/components/Header';
 import { PillTabs } from '@/components/ui/PillTabs';
@@ -683,6 +683,7 @@ function FormResponses({ form, onBack }: { form: DbForm; onBack: () => void }) {
   const [editRow, setEditRow]       = useState<Submission | null>(null);
   const [editData, setEditData]     = useState<Record<string, string>>({});
   const [isSaving, setIsSaving]     = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
     supabase
@@ -700,6 +701,10 @@ function FormResponses({ form, onBack }: { form: DbForm; onBack: () => void }) {
 
   // Dynamic column headers from first row's data keys
   const columns = rows.length > 0 ? Object.keys(rows[0].data) : [];
+
+  const filteredRows = searchTerm.trim()
+    ? rows.filter(r => Object.values(r.data).some(v => String(v).toLowerCase().includes(searchTerm.toLowerCase())))
+    : rows;
 
   async function handleDelete(id: string) {
     const { error } = await supabase.from('form_submissions').delete().eq('id', id);
@@ -760,6 +765,19 @@ function FormResponses({ form, onBack }: { form: DbForm; onBack: () => void }) {
             <div style={{ fontSize: 14 }}>Nenhuma resposta recebida ainda.</div>
           </div>
         ) : (
+          <>
+            {/* Search bar */}
+            <div style={{ position: 'relative', marginBottom: 14 }}>
+              <Search size={15} color="var(--text2)" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
+              <input
+                className="inp"
+                value={searchTerm}
+                onChange={e => setSearchTerm(e.target.value)}
+                placeholder="Buscar respostas..."
+                style={{ paddingLeft: 36, width: '100%', boxSizing: 'border-box', maxWidth: 360 }}
+              />
+            </div>
+
           <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'auto' }}>
               <thead>
@@ -770,7 +788,12 @@ function FormResponses({ form, onBack }: { form: DbForm; onBack: () => void }) {
                 </tr>
               </thead>
               <tbody>
-                {rows.map(row => (
+                {filteredRows.length === 0 && (
+                  <tr><td colSpan={columns.length + 2} style={{ textAlign: 'center', color: 'var(--text2)', padding: 32, fontSize: 13 }}>
+                    Nenhum resultado para "{searchTerm}".
+                  </td></tr>
+                )}
+                {filteredRows.map(row => (
                   <tr key={row.id} style={{ transition: 'background .15s' }}
                     onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-card2)')}
                     onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
@@ -796,6 +819,7 @@ function FormResponses({ form, onBack }: { form: DbForm; onBack: () => void }) {
               </tbody>
             </table>
           </div>
+          </>
         )}
       </div>
 

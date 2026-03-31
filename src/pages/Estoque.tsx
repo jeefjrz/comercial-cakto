@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { Package, Plug, Plus, Pencil, Trash2, Link, Copy, RefreshCw, Loader2 } from 'lucide-react';
+import { Package, Plug, Plus, Pencil, Trash2, Link, Copy, RefreshCw, Loader2, Search } from 'lucide-react';
 import { useAuth } from '@/lib/authContext';
 import { Header } from '@/components/Header';
 import { PillTabs } from '@/components/ui/PillTabs';
@@ -48,6 +48,8 @@ function EstoqueContent() {
   const [form, setForm] = useState({ name: '', category: '', qty: '', unit: '' });
   const [apiKey, setApiKey] = useState('ME-sk-••••••••••••••••••••••••');
   const [webhook, setWebhook] = useState('https://api.cakto.com.br/webhooks/estoque');
+  const [searchItems, setSearchItems]   = useState('');
+  const [searchAwards, setSearchAwards] = useState('');
 
   // ── Fetch ──────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -134,7 +136,18 @@ function EstoqueContent() {
 
         {/* Itens Internos */}
         {tab === 'Itens Internos' && (
-          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, overflow: 'hidden', marginTop: 20 }}>
+          <div style={{ marginTop: 20 }}>
+            <div style={{ position: 'relative', marginBottom: 14 }}>
+              <Search size={15} color="var(--text2)" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
+              <input
+                className="inp"
+                value={searchItems}
+                onChange={e => setSearchItems(e.target.value)}
+                placeholder="Buscar produto..."
+                style={{ paddingLeft: 36, width: '100%', boxSizing: 'border-box', maxWidth: 360 }}
+              />
+            </div>
+          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, overflow: 'hidden' }}>
             <div className="scroll-x">
               <table className="tbl">
                 <thead>
@@ -146,7 +159,20 @@ function EstoqueContent() {
                       Nenhum item no estoque.
                     </td></tr>
                   )}
-                  {items.map(it => (
+                  {items.filter(it =>
+                    !searchItems.trim() ||
+                    it.name.toLowerCase().includes(searchItems.toLowerCase()) ||
+                    it.category.toLowerCase().includes(searchItems.toLowerCase())
+                  ).length === 0 && searchItems.trim() && (
+                    <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--text2)', padding: 32, fontSize: 13 }}>
+                      Nenhum resultado para "{searchItems}".
+                    </td></tr>
+                  )}
+                  {items.filter(it =>
+                    !searchItems.trim() ||
+                    it.name.toLowerCase().includes(searchItems.toLowerCase()) ||
+                    it.category.toLowerCase().includes(searchItems.toLowerCase())
+                  ).map(it => (
                     <tr key={it.id}>
                       <td style={{ fontWeight: 600 }}>{it.name}</td>
                       <td><Badge label={it.category || '—'} color="var(--action)" /></td>
@@ -168,6 +194,7 @@ function EstoqueContent() {
               </table>
             </div>
           </div>
+          </div>
         )}
 
         {/* Premiações */}
@@ -186,6 +213,16 @@ function EstoqueContent() {
                 </div>
               ))}
             </div>
+            <div style={{ position: 'relative', marginBottom: 14 }}>
+              <Search size={15} color="var(--text2)" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
+              <input
+                className="inp"
+                value={searchAwards}
+                onChange={e => setSearchAwards(e.target.value)}
+                placeholder="Buscar premiação..."
+                style={{ paddingLeft: 36, width: '100%', boxSizing: 'border-box', maxWidth: 360 }}
+              />
+            </div>
             <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, overflow: 'hidden' }}>
               <div className="scroll-x">
                 <table className="tbl">
@@ -196,7 +233,20 @@ function EstoqueContent() {
                     {awards.length === 0 && (
                       <tr><td colSpan={4} style={{ textAlign: 'center', color: 'var(--text2)', padding: 32 }}>Nenhuma premiação registrada.</td></tr>
                     )}
-                    {awards.map(a => (
+                    {awards.filter(a =>
+                      !searchAwards.trim() ||
+                      a.client.toLowerCase().includes(searchAwards.toLowerCase()) ||
+                      a.award.toLowerCase().includes(searchAwards.toLowerCase())
+                    ).length === 0 && searchAwards.trim() && (
+                      <tr><td colSpan={4} style={{ textAlign: 'center', color: 'var(--text2)', padding: 32, fontSize: 13 }}>
+                        Nenhum resultado para "{searchAwards}".
+                      </td></tr>
+                    )}
+                    {awards.filter(a =>
+                      !searchAwards.trim() ||
+                      a.client.toLowerCase().includes(searchAwards.toLowerCase()) ||
+                      a.award.toLowerCase().includes(searchAwards.toLowerCase())
+                    ).map(a => (
                       <tr key={a.id}>
                         <td style={{ fontWeight: 600 }}>{a.client}</td>
                         <td style={{ fontSize: 13 }}>{a.award}</td>
