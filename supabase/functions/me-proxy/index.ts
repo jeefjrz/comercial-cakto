@@ -30,14 +30,17 @@ serve(async (req) => {
         body: JSON.stringify(payload),
       })
     } else if (action === 'tracking') {
-      // GET — consultar rastreio por me_cart_id
+      // POST — consultar rastreio por array de IDs
       const { id } = payload as { id: string }
-      meRes = await fetch(`${ME_API}/shipment/tracking?orders[]=${id}`, {
+      meRes = await fetch(`${ME_API}/shipment/tracking`, {
+        method: 'POST',
         headers: {
           'Authorization': `Bearer ${ME_TOKEN}`,
+          'Content-Type':  'application/json',
           'Accept':        'application/json',
           'User-Agent':    'cakto-sistema-comercial (sistemas@cakto.com.br)',
         },
+        body: JSON.stringify({ orders: [id] }),
       })
     } else {
       return new Response(JSON.stringify({ error: 'action inválida' }), {

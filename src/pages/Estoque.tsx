@@ -399,11 +399,10 @@ function EstoqueContent() {
       return
     }
 
-    // ME returns an object keyed by order id; find tracking code
-    const orderData = fnData?.[row.me_cart_id] ?? Object.values(fnData ?? {})[0] ?? {}
-    const code = orderData?.tracking ?? orderData?.tracking_number ?? orderData?.code ?? ''
+    // ME retorna objeto com chave = me_cart_id → { tracking: "..." }
+    const code: string = fnData?.[row.me_cart_id]?.tracking ?? ''
 
-    if (!code) { toast('Rastreio ainda não disponível — aguarde a etiqueta ser paga.', 'info'); return }
+    if (!code) { toast('Etiqueta ainda não gerada/paga no Melhor Envio.', 'info'); return }
 
     const { error: dbErr } = await supabase.from('form_submissions')
       .update({ tracking_code: code, status: 'Em Trânsito' })
