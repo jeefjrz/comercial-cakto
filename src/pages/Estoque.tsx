@@ -2,7 +2,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { Package, Plug, Plus, Pencil, Trash2, Link, Copy, RefreshCw, Loader2, Search, AlertTriangle, X, ShoppingCart, Truck } from 'lucide-react';
+import { Package, Plug, Plus, Pencil, Trash2, Link, Copy, RefreshCw, Loader2, Search, AlertTriangle, X, ShoppingCart, Truck, Send } from 'lucide-react';
 import { useAuth } from '@/lib/authContext';
 import { Header } from '@/components/Header';
 import { PillTabs } from '@/components/ui/PillTabs';
@@ -179,6 +179,7 @@ function EstoqueContent() {
   const [form, setForm] = useState({ name: '', category: '', qty: '', unit: '' });
   const [apiKey, setApiKey] = useState('ME-sk-••••••••••••••••••••••••');
   const [webhook, setWebhook] = useState('https://api.cakto.com.br/webhooks/estoque');
+  const [webhookWa, setWebhookWa] = useState(() => localStorage.getItem('webhookWa') ?? '');
   const [searchItems, setSearchItems] = useState('');
 
   // ── Submissions (Premiações / Logística) ──────────────────────────────────
@@ -196,6 +197,7 @@ function EstoqueContent() {
   const [subEditTracking, setSubEditTracking] = useState('');
   const [cartingId,     setCartingId]     = useState<string | null>(null);
   const [syncingId,     setSyncingId]     = useState<string | null>(null);
+  const [sendingWaId,   setSendingWaId]   = useState<string | null>(null);
   const [isBulkSyncing, setIsBulkSyncing] = useState(false);
   const [subEditCarrier, setSubEditCarrier]   = useState('');
   const [subIsSaving, setSubIsSaving]         = useState(false);
@@ -457,6 +459,30 @@ function EstoqueContent() {
     toast('Prêmio enviado com sucesso para o carrinho do Melhor Envio!', 'success')
   }
 
+  // ── WhatsApp webhook ─────────────────────────────────────────────────────
+  async function triggerWhatsAppWebhook(row: Submission, trackingCode: string, manual = false) {
+    if (!webhookWa) { if (manual) toast('Configure a URL do Webhook WhatsApp nas Integrações.', 'info'); return }
+    if (manual) setSendingWaId(row.id)
+    const r   = extractRecipient(row.data)
+    const cpf = Object.values(row.data).find(v => /^\d{3}\.?\d{3}\.?\d{3}-?\d{2}$/.test(String(v)) || /^\d{11}$/.test(String(v))) ?? ''
+    const payload = {
+      nome:     extractNome(row.data),
+      telefone: r.phone,
+      cpf:      String(cpf).replace(/\D/g, ''),
+      email:    r.email,
+      rastreio: trackingCode,
+    }
+    try {
+      await fetch(webhookWa, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+      if (manual) toast('Webhook WhatsApp disparado!', 'success')
+    } catch (e) {
+      console.error('[webhookWa]', e)
+      if (manual) toast('Falha ao disparar webhook WhatsApp.', 'error')
+    } finally {
+      if (manual) setSendingWaId(null)
+    }
+  }
+
   async function syncTracking(row: Submission) {
     if (!row.me_cart_id) { toast('Sem me_cart_id — gere no carrinho primeiro.', 'error'); return }
     setSyncingId(row.id)
@@ -471,14 +497,19 @@ function EstoqueContent() {
       toast(fnErr.message || 'Erro ao chamar Edge Function', 'error')
       return
     }
-    if (fnData?.error) {
-      console.error('[syncTracking] ME API error:', fnData)
-      toast(`ME API: ${fnData.message || fnData.error}`, 'error')
+
+    // Detecta que o pedido foi apagado/expirou no ME (objeto vazio ou chave ausente)
+    const orderEntry = fnData?.[row.me_cart_id]
+    if (fnData?.error || (!orderEntry && fnData && Object.keys(fnData).length > 0)) {
+      console.warn('[syncTracking] pedido não encontrado no ME — resetando carrinho:', fnData)
+      await supabase.from('form_submissions').update({ me_cart_id: '', status: 'Pendente' }).eq('id', row.id)
+      setSubmissions(p => p.map(s => s.id === row.id ? { ...s, me_cart_id: '', status: 'Pendente' } : s))
+      toast('Item não encontrado no ME. O carrinho foi resetado para você tentar gerar novamente.', 'info')
       return
     }
 
     // ME retorna objeto com chave = me_cart_id → { tracking: "..." }
-    const code: string = fnData?.[row.me_cart_id]?.tracking ?? ''
+    const code: string = orderEntry?.tracking ?? ''
     console.log('[syncTracking] resposta ME:', fnData, '→ code:', code)
 
     if (!code) { toast('Etiqueta ainda não gerada/paga no Melhor Envio.', 'info'); return }
@@ -493,6 +524,9 @@ function EstoqueContent() {
       ? { ...s, tracking_code: code, status: 'Em Trânsito' }
       : s))
     toast(`Rastreio sincronizado: ${code}`, 'success')
+
+    // Dispara webhook WhatsApp automaticamente (individual apenas)
+    void triggerWhatsAppWebhook(row, code)
   }
 
   async function bulkSync() {
@@ -694,7 +728,7 @@ function EstoqueContent() {
 
               {/* Toolbar */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
-                <div style={{ position: 'relative', flex: 1, maxWidth: 360 }}>
+                <div style={{ position: 'relative', flex: 1, minWidth: 250, maxWidth: 360 }}>
                   <Search size={15} color="var(--text2)" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
                   <input className="inp" value={subSearch} onChange={e => setSubSearch(e.target.value)}
                     placeholder="Buscar por nome, CPF, produto…"
@@ -886,6 +920,19 @@ function EstoqueContent() {
                                     : <Truck size={13} />}
                                 </button>
                               ) : null}
+                              {/* Disparar WhatsApp webhook manualmente */}
+                              {row.tracking_code && (
+                                <button onClick={() => triggerWhatsAppWebhook(row, row.tracking_code, true)}
+                                  disabled={sendingWaId === row.id}
+                                  title="Enviar notificação WhatsApp"
+                                  style={{ ...actionBtn('var(--green)'), opacity: sendingWaId === row.id ? 0.5 : 1 }}
+                                  onMouseEnter={e => (e.currentTarget.style.background = 'color-mix(in srgb, var(--green) 12%, transparent)')}
+                                  onMouseLeave={e => (e.currentTarget.style.background = 'none')}>
+                                  {sendingWaId === row.id
+                                    ? <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} />
+                                    : <Send size={13} />}
+                                </button>
+                              )}
                               <button onClick={() => openSubEdit(row)} title="Editar" style={actionBtn('var(--action)')}
                                 onMouseEnter={e => (e.currentTarget.style.background = 'color-mix(in srgb, var(--action) 12%, transparent)')}
                                 onMouseLeave={e => (e.currentTarget.style.background = 'none')}>
@@ -949,6 +996,40 @@ function EstoqueContent() {
                   </Field>
                 </div>
                 <Button variant="secondary" icon={Copy} onClick={() => navigator.clipboard.writeText(webhook)}>Copiar</Button>
+              </div>
+            </div>
+
+            {/* Webhook WhatsApp */}
+            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 24 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+                <div style={{ width: 40, height: 40, borderRadius: 10, background: 'color-mix(in srgb, var(--green) 15%, transparent)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Send size={20} color="var(--green)" />
+                </div>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 15 }}>Webhook WhatsApp (Datacrazy)</div>
+                  <div style={{ fontSize: 12, color: 'var(--text2)' }}>Notifica o cliente via WhatsApp quando o rastreio é sincronizado. Não é disparado pelo sync em massa.</div>
+                </div>
+                {webhookWa && <div style={{ marginLeft: 'auto' }}><Badge label="Configurado" color="var(--green)" /></div>}
+              </div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+                <div style={{ flex: 1 }}>
+                  <Field label="URL do Webhook">
+                    <input className="inp" value={webhookWa}
+                      onChange={e => { setWebhookWa(e.target.value); localStorage.setItem('webhookWa', e.target.value) }}
+                      placeholder="https://n8n.seuservidor.com/webhook/..." />
+                  </Field>
+                </div>
+                <Button variant="secondary" icon={Copy} onClick={() => navigator.clipboard.writeText(webhookWa)}>Copiar</Button>
+              </div>
+              <div style={{ marginTop: 12, background: 'var(--bg-card2)', borderRadius: 8, padding: '10px 14px', fontFamily: 'monospace', fontSize: 12 }}>
+                <div style={{ fontWeight: 700, color: 'var(--text2)', marginBottom: 6, fontSize: 11, textTransform: 'uppercase', letterSpacing: '.06em' }}>Payload enviado (POST)</div>
+                <pre style={{ margin: 0, color: 'var(--text)', lineHeight: 1.6 }}>{`{
+  "nome":     "João Silva",
+  "telefone": "47999999999",
+  "cpf":      "12345678901",
+  "email":    "joao@email.com",
+  "rastreio": "AV081779120BR"
+}`}</pre>
               </div>
             </div>
 
