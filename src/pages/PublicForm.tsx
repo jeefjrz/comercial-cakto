@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { supabase } from '@/lib/supabase/client'
 
@@ -11,14 +11,81 @@ type FormField = {
 type DbForm = {
   id: string; name: string; color: string; background_image: string
   fields: unknown; webhook: string; active: boolean; status: string
-  bg_color: string; field_bg_color: string; field_text_color: string; bg_opacity: number; redirect_url: string
-  logo_url: string; custom_domain: string
+  bg_color: string; field_bg_color: string; field_text_color: string
+  bg_opacity: number; redirect_url: string
+  logo_url: string; logo_width: number; custom_domain: string
 }
 
 interface Props {
   customDomain?: string
 }
 
+/* ── Custom Select ─────────────────────────────────────────── */
+function CustomSelect({
+  options, value, onChange, placeholder, baseStyle,
+}: {
+  options: string[]; value: string; onChange: (v: string) => void
+  placeholder?: string; baseStyle: React.CSSProperties
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [])
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        style={{
+          ...baseStyle,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          cursor: 'pointer', textAlign: 'left',
+        }}
+      >
+        <span style={{ opacity: value ? 1 : 0.45 }}>{value || placeholder || 'Selecione…'}</span>
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" style={{ flexShrink: 0, opacity: 0.6, transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }}>
+          <path d="M6 8L1 3h10z" />
+        </svg>
+      </button>
+
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 50,
+          background: baseStyle.background as string || '#1e293b',
+          border: '1px solid rgba(255,255,255,0.2)', borderRadius: 10,
+          maxHeight: 240, overflowY: 'auto',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+        }}>
+          {options.map(opt => (
+            <div
+              key={opt}
+              onClick={() => { onChange(opt); setOpen(false) }}
+              style={{
+                padding: '11px 14px', cursor: 'pointer', fontSize: 15,
+                color: baseStyle.color as string || '#fff',
+                background: value === opt ? 'rgba(255,255,255,0.1)' : 'transparent',
+                transition: 'background .15s',
+              }}
+              onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.08)')}
+              onMouseLeave={e => (e.currentTarget.style.background = value === opt ? 'rgba(255,255,255,0.1)' : 'transparent')}
+            >
+              {opt}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ── Main Component ────────────────────────────────────────── */
 export default function PublicForm({ customDomain }: Props) {
   const { formId } = useParams<{ formId: string }>()
   const [form, setForm] = useState<DbForm | null>(null)
@@ -29,11 +96,13 @@ export default function PublicForm({ customDomain }: Props) {
   const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
-    const hostname = window.location.hostname
-    console.log('[PublicForm] Hostname atual:', hostname)
+    console.log('[PublicForm] Hostname atual:', window.location.hostname)
     async function load() {
       setLoading(true)
-      let query = supabase.from('forms').select('id,name,color,background_image,fields,webhook,active,status,custom_domain,bg_color,field_bg_color,field_text_color,bg_opacity,redirect_url,logo_url')
+      let query = supabase.from('forms').select(
+        'id,name,color,background_image,fields,webhook,active,status,custom_domain,' +
+        'bg_color,field_bg_color,field_text_color,bg_opacity,redirect_url,logo_url,logo_width'
+      )
 
       if (customDomain) {
         console.log('[PublicForm] Buscando por custom_domain:', customDomain)
@@ -49,13 +118,12 @@ export default function PublicForm({ customDomain }: Props) {
 
       const { data, error: err } = await query.maybeSingle()
 
-      // Logs detalhados para diagnóstico
       if (err) {
         console.error('[PublicForm] Erro Supabase (pode ser RLS bloqueando anon):', err.message, err.code)
         setError('Formulário não encontrado.'); setLoading(false); return
       }
       if (!data) {
-        console.error('[PublicForm] Query retornou null — verifique: (1) o ID/slug está correto, (2) a policy RLS de SELECT para anon na tabela forms existe, (3) o status é "Publicado" e active=true.')
+        console.error('[PublicForm] Query retornou null — verifique: (1) o ID está correto, (2) a policy RLS de SELECT para anon na tabela forms existe, (3) status="Publicado" e active=true.')
         setError('Formulário não encontrado.'); setLoading(false); return
       }
 
@@ -65,7 +133,6 @@ export default function PublicForm({ customDomain }: Props) {
         console.error('[PublicForm] custom_domain não bate:', data.custom_domain, '!=', customDomain)
         setError('Formulário não encontrado.'); setLoading(false); return
       }
-      // Aceita qualquer capitalização: 'Publicado', 'publicado', 'PUBLICADO'
       if (!data.active || data.status?.toLowerCase() !== 'publicado') {
         console.error('[PublicForm] Formulário não publicado. status:', data.status, '| active:', data.active)
         setError('Este formulário não está disponível.'); setLoading(false); return
@@ -82,7 +149,6 @@ export default function PublicForm({ customDomain }: Props) {
     e.preventDefault()
     if (!form) return
 
-    // Validate required fields
     const missing = fields.filter(f => f.required && !values[String(f.id)]?.trim())
     if (missing.length) {
       setError(`Preencha os campos obrigatórios: ${missing.map(f => f.label).join(', ')}`)
@@ -92,26 +158,42 @@ export default function PublicForm({ customDomain }: Props) {
     setSubmitting(true)
     setError('')
 
-    // Increment response count
-    await supabase.rpc('increment_responses', { form_id: form.id }).catch(() => {
-      // fallback: manual increment
-      supabase.from('forms').select('responses').eq('id', form.id).single().then(({ data }) => {
-        if (data) supabase.from('forms').update({ responses: (data.responses || 0) + 1 }).eq('id', form.id)
+    // Build labeled payload: { "Nome": "João", "Email": "..." }
+    const labeledData: Record<string, string> = {}
+    fields.forEach(f => {
+      labeledData[f.label] = values[String(f.id)] || ''
+    })
+
+    // Persist submission to form_submissions table
+    const { error: insertErr } = await supabase.from('form_submissions').insert({
+      form_id: form.id,
+      data: labeledData,
+    })
+    if (insertErr) {
+      console.error('[PublicForm] Erro ao salvar submissão:', insertErr.message)
+      setError('Erro ao enviar. Tente novamente.')
+      setSubmitting(false)
+      return
+    }
+
+    // Increment response count (non-blocking)
+    supabase.rpc('increment_responses', { form_id: form.id }).catch(() => {
+      supabase.from('forms').select('responses').eq('id', form.id).single().then(({ data: r }) => {
+        if (r) supabase.from('forms').update({ responses: (r.responses || 0) + 1 }).eq('id', form.id)
       })
     })
 
-    // Fire webhook if configured
+    // Fire webhook (non-blocking)
     if (form.webhook) {
       fetch(form.webhook, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ form_id: form.id, form_name: form.name, data: values, submitted_at: new Date().toISOString() }),
+        body: JSON.stringify({ form_id: form.id, form_name: form.name, data: labeledData, submitted_at: new Date().toISOString() }),
       }).catch(() => {})
     }
 
     setSubmitting(false)
 
-    // Redireciona se configurado, senão exibe tela de sucesso
     if (form.redirect_url) {
       window.location.href = form.redirect_url
     } else {
@@ -136,11 +218,13 @@ export default function PublicForm({ customDomain }: Props) {
     if (f.type === 'Select') {
       const opts = (f.options || '').split(',').map(o => o.trim()).filter(Boolean)
       return (
-        <select style={{ ...base, cursor: 'pointer', appearance: 'none' }}
-          value={values[id] || ''} onChange={e => setValues(p => ({ ...p, [id]: e.target.value }))}>
-          <option value="">Selecione…</option>
-          {opts.map(o => <option key={o} value={o}>{o}</option>)}
-        </select>
+        <CustomSelect
+          options={opts}
+          value={values[id] || ''}
+          onChange={v => setValues(p => ({ ...p, [id]: v }))}
+          placeholder={f.placeholder || 'Selecione…'}
+          baseStyle={base}
+        />
       )
     }
 
@@ -151,20 +235,20 @@ export default function PublicForm({ customDomain }: Props) {
     )
   }
 
-  const accentColor     = form?.color            || '#2997FF'
-  const pageBgColor     = form?.bg_color         || '#0f172a'
-  const fieldTextColor  = form?.field_text_color || '#ffffff'
-  const formOpacity     = form?.bg_opacity       ?? 60   // 0=transparente, 100=sólido
-  // fundo da página: imagem (se houver) sobre a cor de fundo
+  const accentColor    = form?.color            || '#2997FF'
+  const pageBgColor    = form?.bg_color         || '#0f172a'
+  const fieldTextColor = form?.field_text_color || '#ffffff'
+  const formOpacity    = form?.bg_opacity       ?? 60
+  const logoMaxWidth   = form?.logo_width       || 120
+
   const pageStyle: React.CSSProperties = form?.background_image
     ? { backgroundImage: `url(${form.background_image})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundColor: pageBgColor }
     : { background: pageBgColor }
-  // fundo do container do form: sólido ou translúcido dependendo da opacidade
   const formContainerBg = `rgba(0,0,0,${(100 - formOpacity) / 100 * 0.9})`
 
   if (loading) return (
     <div style={{ minHeight: '100vh', background: '#0f172a', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div style={{ width: 36, height: 36, border: `3px solid ${accentColor}`, borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+      <div style={{ width: 36, height: 36, border: `3px solid #2997FF`, borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   )
@@ -177,28 +261,39 @@ export default function PublicForm({ customDomain }: Props) {
   )
 
   if (submitted) return (
-    <div style={{ minHeight: '100vh', ...pageStyle, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16, padding: 24 }}>
-      <div style={{ width: 72, height: 72, borderRadius: '50%', background: `${accentColor}22`, border: `2px solid ${accentColor}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 36 }}>✓</div>
-      <h2 style={{ fontSize: 26, fontWeight: 800, color: '#fff', textAlign: 'center' }}>Enviado com sucesso!</h2>
-      <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: 15, textAlign: 'center' }}>Obrigado pela sua resposta.</p>
+    <div style={{ minHeight: '100vh', ...pageStyle, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+      <div style={{ textAlign: 'center', maxWidth: 400 }}>
+        <div style={{
+          width: 72, height: 72, borderRadius: '50%',
+          background: 'rgba(34,197,94,0.15)', border: '2px solid #22c55e',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px',
+        }}>
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+        </div>
+        <h2 style={{ fontSize: 26, fontWeight: 800, color: '#fff', marginBottom: 10 }}>Formulário enviado, obrigado!</h2>
+        <p style={{ color: 'rgba(255,255,255,0.55)', fontSize: 15, lineHeight: 1.6 }}>Sua resposta foi registrada com sucesso.</p>
+      </div>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   )
 
   return (
     <div style={{ minHeight: '100vh', ...pageStyle, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 20px', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
-      <form onSubmit={handleSubmit} style={{ width: '100%', maxWidth: 560, background: formContainerBg, backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 20, padding: '40px 36px', boxShadow: '0 24px 80px rgba(0,0,0,0.5)' }}>
-        {/* Header accent */}
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      <form onSubmit={handleSubmit} style={{ width: '100%', maxWidth: 640, background: formContainerBg, backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 20, padding: '40px 36px', boxShadow: '0 24px 80px rgba(0,0,0,0.5)' }}>
         <div style={{ height: 4, background: accentColor, borderRadius: 99, marginBottom: 28 }} />
 
         {form?.logo_url && (
           <div style={{ textAlign: 'center', marginBottom: 20 }}>
-            <img src={form.logo_url} alt="logo" style={{ maxHeight: 56, maxWidth: '100%', objectFit: 'contain' }} />
+            <img src={form.logo_url} alt="logo" style={{ maxWidth: logoMaxWidth, maxHeight: 120, objectFit: 'contain' }} />
           </div>
         )}
 
-        <h1 style={{ fontSize: 26, fontWeight: 800, color: '#fff', marginBottom: 28, lineHeight: 1.2 }}>{form?.name}</h1>
+        <h1 style={{ fontSize: 24, fontWeight: 800, color: '#fff', marginBottom: 28, lineHeight: 1.2 }}>{form?.name}</h1>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
           {fields.map(f => (
             <div key={f.id} style={{ gridColumn: f.width === 'half' ? 'span 1' : 'span 2' }}>
               <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'rgba(255,255,255,0.75)', marginBottom: 7 }}>
@@ -219,7 +314,11 @@ export default function PublicForm({ customDomain }: Props) {
           width: '100%', marginTop: 28, padding: '14px', border: 'none', borderRadius: 12,
           background: accentColor, color: '#fff', fontSize: 16, fontWeight: 700,
           cursor: submitting ? 'not-allowed' : 'pointer', opacity: submitting ? 0.7 : 1, fontFamily: 'inherit',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
         }}>
+          {submitting && (
+            <span style={{ width: 16, height: 16, border: '2px solid rgba(255,255,255,0.4)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.8s linear infinite', display: 'inline-block' }} />
+          )}
           {submitting ? 'Enviando…' : 'Enviar'}
         </button>
       </form>

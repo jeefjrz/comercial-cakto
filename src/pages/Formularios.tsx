@@ -46,6 +46,7 @@ type DbForm = {
   bg_opacity: number;
   redirect_url: string;
   logo_url: string;
+  logo_width: number;
 };
 
 type SubView = 'list' | 'editor' | 'responses';
@@ -56,7 +57,7 @@ const EMPTY_FORM: DbForm = {
   id: '', name: 'Novo Formulário', type: 'Cadastro', slug: '', responses: 0,
   active: true, color: '#2997FF', status: 'Rascunho', fields: [], embed_code: '',
   webhook: '', custom_domain: '', background_image: '',
-  bg_color: '#0f172a', field_bg_color: '#1e293b', field_text_color: '#ffffff', bg_opacity: 60, redirect_url: '', logo_url: '',
+  bg_color: '#0f172a', field_bg_color: '#1e293b', field_text_color: '#ffffff', bg_opacity: 60, redirect_url: '', logo_url: '', logo_width: 120,
 };
 
 export default function FormulariosPage() {
@@ -125,7 +126,7 @@ function FormulariosContent() {
         custom_domain: updated.custom_domain, background_image: updated.background_image,
         bg_color: updated.bg_color, field_bg_color: updated.field_bg_color,
         field_text_color: updated.field_text_color, bg_opacity: updated.bg_opacity,
-        redirect_url: updated.redirect_url, logo_url: updated.logo_url,
+        redirect_url: updated.redirect_url, logo_url: updated.logo_url, logo_width: updated.logo_width,
       }).select().single();
       if (error) { toast(error.message, 'error'); setIsSaving(false); return; }
       setForms(p => [data as DbForm, ...p]);
@@ -137,7 +138,7 @@ function FormulariosContent() {
         custom_domain: updated.custom_domain, background_image: updated.background_image,
         bg_color: updated.bg_color, field_bg_color: updated.field_bg_color,
         field_text_color: updated.field_text_color, bg_opacity: updated.bg_opacity,
-        redirect_url: updated.redirect_url, logo_url: updated.logo_url,
+        redirect_url: updated.redirect_url, logo_url: updated.logo_url, logo_width: updated.logo_width,
       }).eq('id', updated.id);
       if (error) { toast(error.message, 'error'); setIsSaving(false); return; }
       setForms(p => p.map(f => f.id === updated.id ? { ...f, ...updated } : f));
@@ -252,6 +253,7 @@ function FormEditor({ form, onBack, onSave, isSaving }: {
   const [redirectUrl, setRedirectUrl]       = useState(form.redirect_url || '');
   const [fieldTextColor, setFieldTextColor] = useState(form.field_text_color || '#ffffff');
   const [logoUrl, setLogoUrl]               = useState(form.logo_url || '');
+  const [logoWidth, setLogoWidth]           = useState(form.logo_width ?? 120);
 
   // Behavior toggles — persisted in embed_code as JSON
   const parsedBehaviors = (() => { try { return JSON.parse(form.embed_code || '{}').behaviors || {} } catch { return {} } })();
@@ -322,7 +324,7 @@ function FormEditor({ form, onBack, onSave, isSaving }: {
       ...form, name, status, fields: fields as unknown as Json,
       webhook, color, custom_domain: customDomain, background_image: backgroundImage,
       bg_color: bgColor, field_bg_color: fieldBgColor, field_text_color: fieldTextColor,
-      bg_opacity: bgOpacity, redirect_url: redirectUrl, logo_url: logoUrl,
+      bg_opacity: bgOpacity, redirect_url: redirectUrl, logo_url: logoUrl, logo_width: logoWidth,
     };
   }
 
@@ -399,6 +401,15 @@ function FormEditor({ form, onBack, onSave, isSaving }: {
                     </p>
                   </Field>
 
+                  <Field label={`Tamanho da Logo — ${logoWidth}px`}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <input type="range" min={50} max={400} value={logoWidth}
+                        onChange={e => setLogoWidth(Number(e.target.value))}
+                        style={{ flex: 1, accentColor: color }} />
+                      <span style={{ fontSize: 12, fontWeight: 700, minWidth: 44, textAlign: 'right' }}>{logoWidth}px</span>
+                    </div>
+                  </Field>
+
                   <Field label="Imagem de Fundo (URL)">
                     <div style={{ position: 'relative' }}>
                       <input className="inp" value={backgroundImage} onChange={e => setBackgroundImage(e.target.value)}
@@ -436,7 +447,7 @@ function FormEditor({ form, onBack, onSave, isSaving }: {
                     padding: 20,
                     background: `rgba(0,0,0,${(100 - bgOpacity) / 100})`,
                   }}>
-                    {logoUrl && <div style={{ textAlign: 'center', marginBottom: 10 }}><img src={logoUrl} alt="logo" style={{ maxHeight: 40, maxWidth: '100%', objectFit: 'contain' }} /></div>}
+                    {logoUrl && <div style={{ textAlign: 'center', marginBottom: 10 }}><img src={logoUrl} alt="logo" style={{ maxWidth: Math.min(logoWidth, 160), maxHeight: 40, objectFit: 'contain' }} /></div>}
                     <div style={{ fontWeight: 700, fontSize: 14, color: '#fff', marginBottom: 12 }}>{name}</div>
                     {fields.slice(0, 2).map(f => (
                       <div key={f.id} style={{ marginBottom: 10 }}>

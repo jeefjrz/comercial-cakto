@@ -76,23 +76,38 @@ export interface Database {
           active: boolean; color: string; status: FormStatus; fields: Json
           embed_code: string; webhook: string; custom_domain: string; background_image: string
           bg_color: string; field_bg_color: string; field_text_color: string; bg_opacity: number; redirect_url: string
-          logo_url: string; created_at: string; updated_at: string
+          logo_url: string; logo_width: number; created_at: string; updated_at: string
         }
         Insert: {
           id?: string; name: string; type: FormType; slug: string; responses?: number
           active?: boolean; color?: string; status?: FormStatus; fields?: Json
           embed_code?: string; webhook?: string; custom_domain?: string; background_image?: string
           bg_color?: string; field_bg_color?: string; field_text_color?: string; bg_opacity?: number; redirect_url?: string
-          logo_url?: string; created_at?: string; updated_at?: string
+          logo_url?: string; logo_width?: number; created_at?: string; updated_at?: string
         }
         Update: {
           id?: string; name?: string; type?: FormType; slug?: string; responses?: number
           active?: boolean; color?: string; status?: FormStatus; fields?: Json
           embed_code?: string; webhook?: string; custom_domain?: string; background_image?: string
           bg_color?: string; field_bg_color?: string; field_text_color?: string; bg_opacity?: number; redirect_url?: string
-          logo_url?: string; updated_at?: string
+          logo_url?: string; logo_width?: number; updated_at?: string
         }
         Relationships: []
+      }
+
+      form_submissions: {
+        Row: {
+          id: string; form_id: string; data: Json; submitted_at: string
+        }
+        Insert: {
+          id?: string; form_id: string; data?: Json; submitted_at?: string
+        }
+        Update: {
+          id?: string; form_id?: string; data?: Json; submitted_at?: string
+        }
+        Relationships: [
+          { foreignKeyName: 'form_submissions_form_id_fkey'; columns: ['form_id']; isOneToOne: false; referencedRelation: 'forms'; referencedColumns: ['id'] }
+        ]
       }
 
       payments: {
