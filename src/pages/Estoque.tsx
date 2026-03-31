@@ -718,8 +718,20 @@ function EstoqueContent() {
                                   <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
                                 </svg>
                               </a>
+                            ) : row.me_cart_id ? (
+                              <button onClick={() => syncTracking(row)} disabled={syncingId === row.id}
+                                style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'none',
+                                  border: `1px solid ${syncingId === row.id ? 'var(--border)' : 'var(--action)'}`,
+                                  borderRadius: 20, padding: '3px 10px', cursor: syncingId === row.id ? 'default' : 'pointer',
+                                  fontSize: 11, fontWeight: 700, color: syncingId === row.id ? 'var(--text2)' : 'var(--action)',
+                                  opacity: syncingId === row.id ? 0.6 : 1, transition: 'opacity .15s' }}>
+                                {syncingId === row.id
+                                  ? <Loader2 size={10} style={{ animation: 'spin 1s linear infinite' }} />
+                                  : <RefreshCw size={10} />}
+                                {syncingId === row.id ? 'Buscando…' : 'Sincronizar'}
+                              </button>
                             ) : (
-                              <span style={{ color: 'var(--text2)', fontStyle: 'italic' }}>Pendente</span>
+                              <span style={{ color: 'var(--text2)', fontStyle: 'italic', fontSize: 12 }}>Pendente</span>
                             )}
                           </td>
                           {/* Data */}
