@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { supabase } from '@/lib/supabase/client'
 
@@ -145,6 +145,12 @@ export default function PublicForm({ customDomain }: Props) {
 
   const fields: FormField[] = Array.isArray(form?.fields) ? (form!.fields as FormField[]) : []
 
+  const progressPercent = useMemo(() => {
+    if (fields.length === 0) return 0
+    const filled = fields.filter(f => values[String(f.id)]?.trim()).length
+    return Math.round((filled / fields.length) * 100)
+  }, [fields, values])
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!form) return
@@ -283,11 +289,24 @@ export default function PublicForm({ customDomain }: Props) {
     <div style={{ minHeight: '100vh', ...pageStyle, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 20px', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       <form onSubmit={handleSubmit} style={{ width: '100%', maxWidth: 640, background: formContainerBg, backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 20, padding: '40px 36px', boxShadow: '0 24px 80px rgba(0,0,0,0.5)' }}>
-        <div style={{ height: 4, background: accentColor, borderRadius: 99, marginBottom: 28 }} />
+        {/* Progress bar */}
+        <div style={{ height: 4, background: 'rgba(255,255,255,0.1)', borderRadius: 99, marginBottom: 28, overflow: 'hidden' }}>
+          <div style={{
+            height: '100%', borderRadius: 99,
+            background: accentColor,
+            width: `${progressPercent}%`,
+            transition: 'width 0.5s ease-out',
+          }} />
+        </div>
 
+        {/* Logo */}
         {form?.logo_url && (
-          <div style={{ textAlign: 'center', marginBottom: 20 }}>
-            <img src={form.logo_url} alt="logo" style={{ maxWidth: logoMaxWidth, maxHeight: 120, objectFit: 'contain' }} />
+          <div style={{ width: '100%', display: 'flex', justifyContent: 'center', marginBottom: 24 }}>
+            <img
+              src={form.logo_url}
+              alt="logo"
+              style={{ maxWidth: logoMaxWidth, maxHeight: 120, objectFit: 'contain', display: 'block', margin: '0 auto' }}
+            />
           </div>
         )}
 
