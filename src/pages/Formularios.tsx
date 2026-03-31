@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { Plus, ChevronLeft, Pencil, Trash2, Eye, Copy, GripVertical, Settings, Link, Loader2, Globe, Image, Search } from 'lucide-react';
+import { Plus, ChevronLeft, Pencil, Trash2, Eye, Copy, GripVertical, Settings, Link, Loader2, Globe, Image, Search, Send } from 'lucide-react';
 import { useAuth } from '@/lib/authContext';
 import { Header } from '@/components/Header';
 import { PillTabs } from '@/components/ui/PillTabs';
@@ -719,6 +719,8 @@ function FormResponses({ form, onBack }: { form: DbForm; onBack: () => void }) {
     setEditData({ ...row.data });
   }
 
+  const [resendingId, setResendingId] = useState<string | null>(null);
+
   async function handleSaveEdit() {
     if (!editRow) return;
     setIsSaving(true);
@@ -733,15 +735,43 @@ function FormResponses({ form, onBack }: { form: DbForm; onBack: () => void }) {
     toast('Resposta atualizada', 'success');
   }
 
+  async function handleResendWebhook(row: Submission) {
+    if (!form.webhook) { toast('Este formulário não tem webhook configurado.', 'error'); return; }
+    setResendingId(row.id);
+    try {
+      const res = await fetch(form.webhook, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ form_id: form.id, form_name: form.name, data: row.data, submitted_at: row.submitted_at }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      toast('Webhook reenviado com sucesso!', 'success');
+    } catch {
+      toast('Falha ao reenviar o webhook.', 'error');
+    } finally {
+      setResendingId(null);
+    }
+  }
+
+  // ── Styles ──────────────────────────────────────────────────
   const thStyle: React.CSSProperties = {
-    padding: '10px 14px', textAlign: 'left', fontSize: 12, fontWeight: 700,
-    color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.05em',
-    borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap', background: 'var(--bg-card)',
+    padding: '10px 16px', textAlign: 'left', fontSize: 11, fontWeight: 700,
+    color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.06em',
+    whiteSpace: 'nowrap', background: 'var(--bg-card)',
+    position: 'sticky', top: 0, zIndex: 10,
+    borderBottom: '1px solid var(--border)',
+    backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
   };
   const tdStyle: React.CSSProperties = {
-    padding: '12px 14px', fontSize: 13, borderBottom: '1px solid var(--border)',
-    maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+    padding: '11px 16px', fontSize: 13,
+    borderBottom: '1px solid var(--border)',
+    maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
   };
+  const actionBtn = (color: string): React.CSSProperties => ({
+    background: 'none', border: 'none', cursor: 'pointer', color,
+    padding: '5px 6px', borderRadius: 6, display: 'flex', alignItems: 'center',
+    transition: 'background .15s',
+  });
 
   return (
     <>
@@ -749,7 +779,7 @@ function FormResponses({ form, onBack }: { form: DbForm; onBack: () => void }) {
       <div className="page-wrap">
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24 }}>
           <Button variant="ghost" icon={ChevronLeft} onClick={onBack}>Voltar</Button>
-          <div>
+          <div style={{ flex: 1 }}>
             <h1 style={{ fontSize: 22, fontWeight: 800 }}>{form.name}</h1>
             <div style={{ fontSize: 13, color: 'var(--text2)' }}>{rows.length} respostas</div>
           </div>
@@ -766,59 +796,82 @@ function FormResponses({ form, onBack }: { form: DbForm; onBack: () => void }) {
           </div>
         ) : (
           <>
-            {/* Search bar */}
-            <div style={{ position: 'relative', marginBottom: 14 }}>
-              <Search size={15} color="var(--text2)" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
-              <input
-                className="inp"
-                value={searchTerm}
-                onChange={e => setSearchTerm(e.target.value)}
-                placeholder="Buscar respostas..."
-                style={{ paddingLeft: 36, width: '100%', boxSizing: 'border-box', maxWidth: 360 }}
-              />
+            {/* Toolbar */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+              <div style={{ position: 'relative', flex: 1, maxWidth: 360 }}>
+                <Search size={15} color="var(--text2)" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
+                <input className="inp" value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
+                  placeholder="Buscar respostas..." style={{ paddingLeft: 36, width: '100%', boxSizing: 'border-box' }} />
+              </div>
+              <span style={{ fontSize: 12, color: 'var(--text2)', whiteSpace: 'nowrap' }}>
+                {filteredRows.length} de {rows.length}
+              </span>
             </div>
 
-          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'auto' }}>
-              <thead>
-                <tr>
-                  {columns.map(col => <th key={col} style={thStyle}>{col}</th>)}
-                  <th style={thStyle}>Data de Envio</th>
-                  <th style={{ ...thStyle, textAlign: 'right' }}>Ações</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredRows.length === 0 && (
-                  <tr><td colSpan={columns.length + 2} style={{ textAlign: 'center', color: 'var(--text2)', padding: 32, fontSize: 13 }}>
-                    Nenhum resultado para "{searchTerm}".
-                  </td></tr>
-                )}
-                {filteredRows.map(row => (
-                  <tr key={row.id} style={{ transition: 'background .15s' }}
-                    onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-card2)')}
-                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                  >
-                    {columns.map(col => (
-                      <td key={col} style={tdStyle} title={row.data[col] || '—'}>{row.data[col] || <span style={{ color: 'var(--text2)' }}>—</span>}</td>
-                    ))}
-                    <td style={{ ...tdStyle, whiteSpace: 'nowrap', color: 'var(--text2)' }}>
-                      {new Date(row.submitted_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                    </td>
-                    <td style={{ ...tdStyle, textAlign: 'right' }}>
-                      <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                        <button onClick={() => openEdit(row)} title="Editar" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--action)', padding: 4 }}>
-                          <Pencil size={14} />
-                        </button>
-                        <button onClick={() => setDeleteId(row.id)} title="Excluir" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', padding: 4 }}>
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    </td>
+            {/* Table */}
+            <div style={{
+              border: '1px solid var(--border)', borderRadius: 14, overflow: 'hidden',
+              maxHeight: '70vh', overflowY: 'auto', overflowX: 'auto',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.25)',
+            }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'auto' }}>
+                <thead>
+                  <tr>
+                    {columns.map(col => <th key={col} style={thStyle}>{col}</th>)}
+                    <th style={thStyle}>Data de Envio</th>
+                    <th style={{ ...thStyle, textAlign: 'right', paddingRight: 20 }}>Ações</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {filteredRows.length === 0 && (
+                    <tr><td colSpan={columns.length + 2} style={{ textAlign: 'center', color: 'var(--text2)', padding: 40, fontSize: 13 }}>
+                      Nenhum resultado para "{searchTerm}".
+                    </td></tr>
+                  )}
+                  {filteredRows.map((row, i) => (
+                    <tr key={row.id}
+                      style={{ background: i % 2 === 0 ? 'var(--bg-card)' : 'var(--bg-card2)', transition: 'background .15s' }}
+                      onMouseEnter={e => (e.currentTarget.style.background = 'color-mix(in srgb, var(--action) 6%, var(--bg-card2))')}
+                      onMouseLeave={e => (e.currentTarget.style.background = i % 2 === 0 ? 'var(--bg-card)' : 'var(--bg-card2)')}
+                    >
+                      {columns.map(col => (
+                        <td key={col} style={tdStyle} title={row.data[col] || ''}>
+                          {row.data[col] || <span style={{ color: 'var(--text2)', opacity: .45 }}>—</span>}
+                        </td>
+                      ))}
+                      <td style={{ ...tdStyle, color: 'var(--text2)', whiteSpace: 'nowrap' }}>
+                        {new Date(row.submitted_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      </td>
+                      <td style={{ ...tdStyle, textAlign: 'right', paddingRight: 12 }}>
+                        <div style={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
+                          <button onClick={() => openEdit(row)} title="Editar" style={actionBtn('var(--action)')}
+                            onMouseEnter={e => (e.currentTarget.style.background = 'color-mix(in srgb, var(--action) 12%, transparent)')}
+                            onMouseLeave={e => (e.currentTarget.style.background = 'none')}>
+                            <Pencil size={13} />
+                          </button>
+                          <button
+                            onClick={() => handleResendWebhook(row)}
+                            disabled={resendingId === row.id}
+                            title="Reenviar Webhook"
+                            style={actionBtn('var(--purple)')}
+                            onMouseEnter={e => (e.currentTarget.style.background = 'color-mix(in srgb, var(--purple) 12%, transparent)')}
+                            onMouseLeave={e => (e.currentTarget.style.background = 'none')}>
+                            {resendingId === row.id
+                              ? <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} />
+                              : <Send size={13} />}
+                          </button>
+                          <button onClick={() => setDeleteId(row.id)} title="Excluir" style={actionBtn('var(--red)')}
+                            onMouseEnter={e => (e.currentTarget.style.background = 'color-mix(in srgb, var(--red) 12%, transparent)')}
+                            onMouseLeave={e => (e.currentTarget.style.background = 'none')}>
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </>
         )}
       </div>
