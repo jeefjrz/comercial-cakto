@@ -2,7 +2,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { Package, Plug, Plus, Pencil, Trash2, Link, Copy, RefreshCw, Loader2, Search, AlertTriangle, X } from 'lucide-react';
+import { Package, Plug, Plus, Pencil, Trash2, Link, Copy, RefreshCw, Loader2, Search, AlertTriangle, X, ShoppingCart, Truck } from 'lucide-react';
 import { useAuth } from '@/lib/authContext';
 import { Header } from '@/components/Header';
 import { PillTabs } from '@/components/ui/PillTabs';
@@ -16,14 +16,15 @@ import { supabase } from '@/lib/supabase/client';
 type DbItem    = { id: string; name: string; category: string; qty: number; unit: string }
 type Submission = {
   id: string; form_id: string; data: Record<string, string>; submitted_at: string
-  status: string; tracking_code: string; carrier: string
+  status: string; tracking_code: string; carrier: string; me_cart_id: string
 }
 type ExtraItem  = { id: string; name: string }
 
-const SUB_STATUSES = ['Pendente', 'Em Trânsito', 'Entregue', 'Cancelado'] as const
+const SUB_STATUSES = ['Pendente', 'No Carrinho', 'Em Trânsito', 'Entregue', 'Cancelado'] as const
 
 const STATUS_COLORS: Record<string, string> = {
   'Pendente':    'var(--orange)',
+  'No Carrinho': 'var(--purple)',
   'Em Trânsito': 'var(--action)',
   'Entregue':    'var(--green)',
   'Cancelado':   'var(--red)',
@@ -70,6 +71,38 @@ function trackingUrl(code: string, carrier: string): string {
   if (c.includes('correios')) return `https://rastreamento.correios.com.br/app/index.php?objetos=${code}`
   // Default: Melhor Envio / generic
   return `https://melhorrastreio.com.br/rastreio/${code}`
+}
+
+/** Returns package dimensions/weight based on meta milestone */
+function getDimensions(meta: string) {
+  const m = meta.toLowerCase().replace(/[\s.]/g, '')
+  if (m.includes('10k'))  return { width: 8,  height: 4,  length: 8,  weight: 0.1 }
+  if (m.includes('100k') || m.includes('250k')) return { width: 30, height: 18, length: 35, weight: 3.0 }
+  if (m.includes('500k')) return { width: 32, height: 4,  length: 43, weight: 3.8 }
+  if (m.includes('1m') || m.includes('5m') || m.includes('10m')) return { width: 38, height: 17, length: 50, weight: 3.8 }
+  return { width: 30, height: 18, length: 35, weight: 3.0 } // default
+}
+
+/** Extracts recipient shipping address from submission JSONB */
+function extractRecipient(data: Record<string, string>) {
+  const get = (re: RegExp) => {
+    const k = Object.keys(data).find(k => re.test(k) && !k.startsWith('_'))
+    return k ? data[k] ?? '' : ''
+  }
+  return {
+    name:        get(/nome/i) || '—',
+    phone:       get(/telefone|celular|phone/i).replace(/\D/g, ''),
+    email:       get(/email|e-mail/i),
+    document:    get(/cpf|cnpj|document/i).replace(/\D/g, ''),
+    postal_code: get(/cep/i).replace(/\D/g, ''),
+    address:     get(/endereço|rua|logradouro|address/i),
+    number:      get(/número|numero|n°|nro/i) || 's/n',
+    complement:  get(/complemento|comp/i),
+    district:    get(/bairro|district/i),
+    city:        get(/cidade|city/i),
+    state_abbr:  get(/estado|uf|state/i).slice(0, 2).toUpperCase(),
+    country_id:  'BR',
+  }
 }
 
 /** Finds the best matching inventory item for a raw produto string */
@@ -123,6 +156,8 @@ function EstoqueContent() {
   const [subEditExtras, setSubEditExtras]     = useState<ExtraItem[]>([]);
   const [subEditExtraSelect, setSubEditExtraSelect] = useState('');
   const [subEditTracking, setSubEditTracking] = useState('');
+  const [cartingId,  setCartingId]  = useState<string | null>(null);
+  const [syncingId,  setSyncingId]  = useState<string | null>(null);
   const [subEditCarrier, setSubEditCarrier]   = useState('');
   const [subIsSaving, setSubIsSaving]         = useState(false);
 
@@ -132,7 +167,7 @@ function EstoqueContent() {
       setIsLoading(true);
       const [{ data: inv, error: ie }, { data: subs, error: se }] = await Promise.all([
         supabase.from('inventory').select('id,name,category,qty,unit').order('name'),
-        supabase.from('form_submissions').select('id,form_id,data,submitted_at,status,tracking_code,carrier').order('submitted_at', { ascending: false }),
+        supabase.from('form_submissions').select('id,form_id,data,submitted_at,status,tracking_code,carrier,me_cart_id').order('submitted_at', { ascending: false }),
       ]);
       if (ie) toast(ie.message, 'error');
       if (se) toast(se.message, 'error');
@@ -295,6 +330,90 @@ function EstoqueContent() {
     setSubEditRow(null);
     setSubIsSaving(false);
     toast('Envio atualizado!', 'success');
+  }
+
+  // ── Melhor Envio integration ──────────────────────────────────────────────
+  async function addToCart(row: Submission) {
+    setCartingId(row.id)
+    const meta      = extractMeta(row.data)
+    const dims      = getDimensions(meta)
+    const recipient = extractRecipient(row.data)
+
+    const payload = {
+      service: 1, // Correios PAC — altere conforme necessário
+      from: {
+        name:        import.meta.env.VITE_ME_FROM_NAME        || 'Cakto',
+        phone:       import.meta.env.VITE_ME_FROM_PHONE       || '11999999999',
+        email:       import.meta.env.VITE_ME_FROM_EMAIL       || 'envios@cakto.com.br',
+        document:    import.meta.env.VITE_ME_FROM_DOCUMENT    || '00000000000000',
+        address:     import.meta.env.VITE_ME_FROM_ADDRESS     || 'Rua Exemplo',
+        number:      import.meta.env.VITE_ME_FROM_NUMBER      || '100',
+        district:    import.meta.env.VITE_ME_FROM_DISTRICT    || 'Centro',
+        city:        import.meta.env.VITE_ME_FROM_CITY        || 'São Paulo',
+        state_abbr:  import.meta.env.VITE_ME_FROM_STATE       || 'SP',
+        country_id:  'BR',
+        postal_code: import.meta.env.VITE_ME_FROM_POSTAL_CODE || '01310100',
+      },
+      to: recipient,
+      volumes: [{ height: dims.height, width: dims.width, length: dims.length, weight: dims.weight }],
+      products: [{ name: meta || 'Premiação', quantity: 1, unitary_value: 1 }],
+      options: { insurance_value: 0, receipt: false, own_hand: false, reverse: false, non_commercial: true },
+    }
+
+    const { data: fnData, error } = await supabase.functions.invoke('me-proxy', {
+      body: { action: 'cart', payload },
+    })
+    setCartingId(null)
+
+    if (error || fnData?.error || fnData?.errors) {
+      const msg = fnData?.message || fnData?.errors || error?.message || 'Erro ao adicionar ao carrinho'
+      toast(String(msg), 'error')
+      return
+    }
+
+    const cartId = fnData?.id ?? fnData?.data?.id ?? ''
+    if (!cartId) { toast('ID do carrinho não retornado pela API', 'error'); return }
+
+    const { error: dbErr } = await supabase.from('form_submissions')
+      .update({ me_cart_id: String(cartId), status: 'No Carrinho' })
+      .eq('id', row.id)
+    if (dbErr) { toast(dbErr.message, 'error'); return }
+
+    setSubmissions(p => p.map(s => s.id === row.id
+      ? { ...s, me_cart_id: String(cartId), status: 'No Carrinho' }
+      : s))
+    toast(`Adicionado ao carrinho ME (#${cartId})`, 'success')
+  }
+
+  async function syncTracking(row: Submission) {
+    if (!row.me_cart_id) { toast('Sem me_cart_id — gere no carrinho primeiro.', 'error'); return }
+    setSyncingId(row.id)
+
+    const { data: fnData, error } = await supabase.functions.invoke('me-proxy', {
+      body: { action: 'tracking', payload: { id: row.me_cart_id } },
+    })
+    setSyncingId(null)
+
+    if (error || fnData?.error) {
+      toast(String(fnData?.message || error?.message || 'Erro ao buscar rastreio'), 'error')
+      return
+    }
+
+    // ME returns an object keyed by order id; find tracking code
+    const orderData = fnData?.[row.me_cart_id] ?? Object.values(fnData ?? {})[0] ?? {}
+    const code = orderData?.tracking ?? orderData?.tracking_number ?? orderData?.code ?? ''
+
+    if (!code) { toast('Rastreio ainda não disponível — aguarde a etiqueta ser paga.', 'info'); return }
+
+    const { error: dbErr } = await supabase.from('form_submissions')
+      .update({ tracking_code: code, status: 'Em Trânsito' })
+      .eq('id', row.id)
+    if (dbErr) { toast(dbErr.message, 'error'); return }
+
+    setSubmissions(p => p.map(s => s.id === row.id
+      ? { ...s, tracking_code: code, status: 'Em Trânsito' }
+      : s))
+    toast(`Rastreio sincronizado: ${code}`, 'success')
   }
 
   function addExtra() {
@@ -488,6 +607,20 @@ function EstoqueContent() {
                     Sem estoque
                   </button>
                 </div>
+                {/* Sync rastreio de todos com me_cart_id sem tracking */}
+                {submissions.some(s => s.me_cart_id && !s.tracking_code) && (
+                  <button
+                    onClick={() => {
+                      const pending = submissions.filter(s => s.me_cart_id && !s.tracking_code)
+                      pending.forEach(s => syncTracking(s))
+                    }}
+                    style={{ padding: '5px 12px', borderRadius: 20, border: '1px solid var(--action)',
+                      cursor: 'pointer', fontSize: 12, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 5,
+                      background: 'color-mix(in srgb, var(--action) 10%, var(--bg-card2))', color: 'var(--action)' }}>
+                    <Truck size={11} />
+                    Sincronizar Rastreio
+                  </button>
+                )}
                 <span style={{ fontSize: 12, color: 'var(--text2)', whiteSpace: 'nowrap' }}>
                   {filtered.length} de {submissions.length}
                 </span>
@@ -586,7 +719,31 @@ function EstoqueContent() {
                             </select>
                           </td>
                           <td style={{ padding: '11px 16px', borderBottom: '1px solid var(--border)', textAlign: 'right' }}>
-                            <div style={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
+                            <div style={{ display: 'flex', gap: 2, justifyContent: 'flex-end', alignItems: 'center' }}>
+                              {/* Gerar no Carrinho ME */}
+                              {!row.me_cart_id ? (
+                                <button onClick={() => addToCart(row)}
+                                  disabled={cartingId === row.id}
+                                  title="Gerar no Carrinho ME"
+                                  style={{ ...actionBtn('var(--purple)'), opacity: cartingId === row.id ? 0.5 : 1 }}
+                                  onMouseEnter={e => (e.currentTarget.style.background = 'color-mix(in srgb, var(--purple) 12%, transparent)')}
+                                  onMouseLeave={e => (e.currentTarget.style.background = 'none')}>
+                                  {cartingId === row.id
+                                    ? <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} />
+                                    : <ShoppingCart size={13} />}
+                                </button>
+                              ) : !row.tracking_code ? (
+                                <button onClick={() => syncTracking(row)}
+                                  disabled={syncingId === row.id}
+                                  title="Sincronizar Rastreio"
+                                  style={{ ...actionBtn('var(--action)'), opacity: syncingId === row.id ? 0.5 : 1 }}
+                                  onMouseEnter={e => (e.currentTarget.style.background = 'color-mix(in srgb, var(--action) 12%, transparent)')}
+                                  onMouseLeave={e => (e.currentTarget.style.background = 'none')}>
+                                  {syncingId === row.id
+                                    ? <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} />
+                                    : <Truck size={13} />}
+                                </button>
+                              ) : null}
                               <button onClick={() => openSubEdit(row)} title="Editar" style={actionBtn('var(--action)')}
                                 onMouseEnter={e => (e.currentTarget.style.background = 'color-mix(in srgb, var(--action) 12%, transparent)')}
                                 onMouseLeave={e => (e.currentTarget.style.background = 'none')}>

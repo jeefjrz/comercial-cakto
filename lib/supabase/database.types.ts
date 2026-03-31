@@ -98,15 +98,15 @@ export interface Database {
       form_submissions: {
         Row: {
           id: string; form_id: string; data: Json; submitted_at: string; status: string
-          tracking_code: string; carrier: string
+          tracking_code: string; carrier: string; me_cart_id: string
         }
         Insert: {
           id?: string; form_id: string; data?: Json; submitted_at?: string; status?: string
-          tracking_code?: string; carrier?: string
+          tracking_code?: string; carrier?: string; me_cart_id?: string
         }
         Update: {
           id?: string; form_id?: string; data?: Json; submitted_at?: string; status?: string
-          tracking_code?: string; carrier?: string
+          tracking_code?: string; carrier?: string; me_cart_id?: string
         }
         Relationships: [
           { foreignKeyName: 'form_submissions_form_id_fkey'; columns: ['form_id']; isOneToOne: false; referencedRelation: 'forms'; referencedColumns: ['id'] }
