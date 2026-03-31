@@ -91,7 +91,7 @@ function extractRecipient(data: Record<string, string>) {
   }
   return {
     name:        get(/nome/i) || '—',
-    phone:       get(/telefone|celular|phone/i).replace(/\D/g, ''),
+    phone:       normalizePhone(get(/telefone|celular|phone/i)),
     email:       get(/email|e-mail/i),
     document:    get(/cpf|cnpj|document/i).replace(/\D/g, ''),
     postal_code: get(/cep/i).replace(/\D/g, ''),
@@ -100,7 +100,7 @@ function extractRecipient(data: Record<string, string>) {
     complement:  get(/complemento|comp/i),
     district:    get(/bairro|district/i),
     city:        get(/cidade|city/i),
-    state_abbr:  get(/estado|uf|state/i).slice(0, 2).toUpperCase(),
+    state_abbr:  normalizeStateAbbr(get(/estado|uf|state/i)),
     country_id:  'BR',
   }
 }
@@ -116,6 +116,30 @@ function isValidCPF(raw: string): boolean {
     return r === 10 || r === 11 ? 0 : r
   }
   return calc(9) === parseInt(d[9]) && calc(10) === parseInt(d[10])
+}
+
+const STATE_MAP: Record<string, string> = {
+  'acre':'AC','alagoas':'AL','amapá':'AP','amapa':'AP','amazonas':'AM',
+  'bahia':'BA','ceará':'CE','ceara':'CE','distrito federal':'DF',
+  'espírito santo':'ES','espirito santo':'ES','goiás':'GO','goias':'GO',
+  'maranhão':'MA','maranhao':'MA','mato grosso do sul':'MS','mato grosso':'MT',
+  'minas gerais':'MG','pará':'PA','para':'PA','paraíba':'PB','paraiba':'PB',
+  'paraná':'PR','parana':'PR','pernambuco':'PE','piauí':'PI','piaui':'PI',
+  'rio de janeiro':'RJ','rio grande do norte':'RN','rio grande do sul':'RS',
+  'rondônia':'RO','rondonia':'RO','roraima':'RR','santa catarina':'SC',
+  'são paulo':'SP','sao paulo':'SP','sergipe':'SE','tocantins':'TO',
+}
+
+function normalizePhone(raw: string): string {
+  let d = raw.replace(/\D/g, '')
+  if (d.startsWith('55') && d.length > 11) d = d.slice(2)
+  return d
+}
+
+function normalizeStateAbbr(raw: string): string {
+  const t = raw.trim().toLowerCase()
+  if (t.length === 2) return raw.trim().toUpperCase()
+  return STATE_MAP[t] ?? raw.trim().toUpperCase().slice(0, 2)
 }
 
 /** Finds the best matching inventory item for a raw produto string */
@@ -169,8 +193,9 @@ function EstoqueContent() {
   const [subEditExtras, setSubEditExtras]     = useState<ExtraItem[]>([]);
   const [subEditExtraSelect, setSubEditExtraSelect] = useState('');
   const [subEditTracking, setSubEditTracking] = useState('');
-  const [cartingId,  setCartingId]  = useState<string | null>(null);
-  const [syncingId,  setSyncingId]  = useState<string | null>(null);
+  const [cartingId,     setCartingId]     = useState<string | null>(null);
+  const [syncingId,     setSyncingId]     = useState<string | null>(null);
+  const [isBulkSyncing, setIsBulkSyncing] = useState(false);
   const [subEditCarrier, setSubEditCarrier]   = useState('');
   const [subIsSaving, setSubIsSaving]         = useState(false);
 
@@ -373,11 +398,25 @@ function EstoqueContent() {
       options: { insurance_value: 0, receipt: false, own_hand: false, reverse: false, non_commercial: true },
     }
 
-    // Valida CPF do destinatário antes de chamar a API
+    // Valida CPF do destinatário
     const recipientDoc = recipient.document?.replace(/\D/g, '') ?? ''
     if (recipientDoc && !isValidCPF(recipientDoc)) {
       setCartingId(null)
-      toast('O CPF do cliente é inválido. Por favor, corrija os dados da resposta antes de enviar.', 'error')
+      toast('O CPF do cliente é inválido. Corrija os dados da resposta antes de enviar.', 'error')
+      return
+    }
+
+    // Valida telefone (mínimo DDD + 8 dígitos = 10)
+    if (recipient.phone && recipient.phone.length < 10) {
+      setCartingId(null)
+      toast(`Telefone inválido (${recipient.phone}). Corrija os dados da resposta.`, 'error')
+      return
+    }
+
+    // Valida UF (exatamente 2 letras)
+    if (!recipient.state_abbr || recipient.state_abbr.length !== 2 || /\d/.test(recipient.state_abbr)) {
+      setCartingId(null)
+      toast(`Estado inválido ("${recipient.state_abbr || '—'}"). Corrija para a sigla UF (ex: SC, SP).`, 'error')
       return
     }
 
@@ -453,6 +492,37 @@ function EstoqueContent() {
       ? { ...s, tracking_code: code, status: 'Em Trânsito' }
       : s))
     toast(`Rastreio sincronizado: ${code}`, 'success')
+  }
+
+  async function bulkSync() {
+    setIsBulkSyncing(true)
+    toast('Buscando pedidos no Melhor Envio…', 'info')
+
+    const { data: fnData, error: fnErr } = await supabase.functions.invoke('me-proxy', {
+      body: { action: 'sync-bulk' },
+    })
+    setIsBulkSyncing(false)
+
+    if (fnErr || fnData?.error) {
+      console.error('[bulkSync]', fnErr ?? fnData)
+      toast(fnData?.message || fnErr?.message || 'Erro na sincronização em massa.', 'error')
+      return
+    }
+
+    const { updated = 0, total = 0 } = fnData as { updated: number; total: number }
+
+    // Re-fetch submissions to reflect DB changes
+    const { data: subs } = await supabase
+      .from('form_submissions')
+      .select('id,form_id,data,submitted_at,status,tracking_code,carrier,me_cart_id')
+      .order('submitted_at', { ascending: false })
+    if (subs) setSubmissions(subs as Submission[])
+
+    if (updated === 0) {
+      toast(`Nenhum novo rastreio encontrado (${total} envios verificados no ME).`, 'info')
+    } else {
+      toast(`${updated} pedido${updated !== 1 ? 's' : ''} recuperado${updated !== 1 ? 's' : ''}! (de ${total} envios no ME)`, 'success')
+    }
   }
 
   function addExtra() {
@@ -646,6 +716,22 @@ function EstoqueContent() {
                     Sem estoque
                   </button>
                 </div>
+                {/* Sincronização retroativa em massa */}
+                <button onClick={bulkSync} disabled={isBulkSyncing}
+                  style={{ padding: '5px 12px', borderRadius: 20,
+                    border: `1px solid ${isBulkSyncing ? 'var(--border)' : 'var(--purple)'}`,
+                    cursor: isBulkSyncing ? 'default' : 'pointer', fontSize: 12, fontWeight: 600,
+                    display: 'flex', alignItems: 'center', gap: 5,
+                    background: isBulkSyncing
+                      ? 'var(--bg-card2)'
+                      : 'color-mix(in srgb, var(--purple) 12%, var(--bg-card2))',
+                    color: isBulkSyncing ? 'var(--text2)' : 'var(--purple)',
+                    opacity: isBulkSyncing ? 0.7 : 1, transition: 'all .15s' }}>
+                  {isBulkSyncing
+                    ? <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} />
+                    : <RefreshCw size={11} />}
+                  {isBulkSyncing ? 'Sincronizando…' : 'Sincronizar Pedidos Antigos'}
+                </button>
                 {/* Sync rastreio de todos com me_cart_id sem tracking */}
                 {submissions.some(s => s.me_cart_id && !s.tracking_code) && (
                   <button
