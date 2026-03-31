@@ -110,6 +110,8 @@ serve(async (req) => {
 
     // ── 3. Sincronização retroativa em massa ─────────────────────────────────
     if (action === 'sync-bulk') {
+      const sanitizeDoc = (v: unknown): string => v ? String(v).replace(/\D/g, '') : ''
+
       // Busca até 100 pedidos no ME (ordenados por mais recentes)
       const { data: ordersData } = await meJson(
         `${ME_API}/orders?per_page=100&page=1&orderBy=created_at&sortedBy=desc`
@@ -122,35 +124,41 @@ serve(async (req) => {
         })
       }
 
-      // Busca submissões sem rastreio do Supabase
+      // Busca submissões sem tracking_code OU com me_cart_id mas sem rastreio
       const subsRes = await fetch(
-        `${SB_URL}/rest/v1/form_submissions?tracking_code=eq.&select=id,data,me_cart_id`,
+        `${SB_URL}/rest/v1/form_submissions?tracking_code=eq.&select=id,data,me_cart_id,status`,
         { headers: SB_HEADERS }
       )
-      const submissions: Array<{ id: string; data: Record<string, string>; me_cart_id: string }> =
+      const submissions: Array<{ id: string; data: Record<string, string>; me_cart_id: string; status: string }> =
         await subsRes.json()
+
+      // Logs de diagnóstico
+      const firstOrder = orders[0] as Record<string, unknown>
+      console.log('[sync-bulk] Exemplo ME doc:', sanitizeDoc((firstOrder?.to as Record<string, unknown>)?.document))
+      console.log('[sync-bulk] Exemplo DB data keys:', Object.keys(submissions[0]?.data ?? {}))
+      console.log('[sync-bulk] Exemplo DB data values (primeiros 3):', Object.values(submissions[0]?.data ?? {}).slice(0, 3))
+      console.log(`[sync-bulk] ${orders.length} orders ME | ${submissions.length} submissões sem tracking no DB`)
 
       let updated = 0
 
       for (const order of orders) {
-        const o = order as Record<string, unknown>
-        const toDoc  = String((o.to as Record<string, unknown>)?.document ?? '').replace(/\D/g, '')
-        const meId   = String(o.id ?? '')
-        const track  = String(o.tracking ?? '')
+        const o       = order as Record<string, unknown>
+        const meDoc   = sanitizeDoc((o.to as Record<string, unknown>)?.document)
+        const meId    = String(o.id ?? '')
+        const track   = o.tracking ? String(o.tracking) : ''
         const meStatus = ME_STATUS_MAP[String(o.status ?? '')] ?? 'Em Trânsito'
 
-        if (!toDoc) continue
+        if (!meDoc) continue
 
-        // Procura submissão com CPF igual e sem tracking
+        // Procura submissão: match por me_cart_id (exato) ou por CPF em qualquer campo JSONB
         const match = submissions.find(sub => {
-          if (sub.me_cart_id && sub.me_cart_id === meId) return true // match direto por ID
-          // Match por CPF em qualquer valor do JSONB
-          return Object.values(sub.data).some(v =>
-            String(v).replace(/\D/g, '') === toDoc
-          )
+          if (sub.me_cart_id && sub.me_cart_id === meId) return true
+          return Object.values(sub.data).some(v => sanitizeDoc(v) === meDoc)
         })
 
         if (!match) continue
+
+        console.log(`[sync-bulk] MATCH id=${match.id} meId=${meId} doc=${meDoc} track=${track || '(vazio)'}`)
 
         // Monta patch — tracking pode estar vazio se etiqueta ainda não foi gerada
         const patch: Record<string, string> = { me_cart_id: meId, status: meStatus }
@@ -166,8 +174,9 @@ serve(async (req) => {
         )
         if (patchRes.ok) {
           updated++
-          // Remove do array para não parear o mesmo novamente
           submissions.splice(submissions.indexOf(match), 1)
+        } else {
+          console.error(`[sync-bulk] PATCH falhou id=${match.id}:`, await patchRes.text())
         }
       }
 
