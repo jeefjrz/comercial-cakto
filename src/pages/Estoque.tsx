@@ -105,6 +105,19 @@ function extractRecipient(data: Record<string, string>) {
   }
 }
 
+/** Valida CPF matematicamente (dígitos verificadores) */
+function isValidCPF(raw: string): boolean {
+  const d = raw.replace(/\D/g, '')
+  if (d.length !== 11 || /^(\d)\1{10}$/.test(d)) return false
+  const calc = (len: number) => {
+    let sum = 0
+    for (let i = 0; i < len; i++) sum += parseInt(d[i]) * (len + 1 - i)
+    const r = (sum * 10) % 11
+    return r === 10 || r === 11 ? 0 : r
+  }
+  return calc(9) === parseInt(d[9]) && calc(10) === parseInt(d[10])
+}
+
 /** Finds the best matching inventory item for a raw produto string */
 function matchInventoryItem(produto: string, invItems: DbItem[]): DbItem | undefined {
   if (!produto || produto === '—') return undefined
@@ -360,6 +373,14 @@ function EstoqueContent() {
       options: { insurance_value: 0, receipt: false, own_hand: false, reverse: false, non_commercial: true },
     }
 
+    // Valida CPF do destinatário antes de chamar a API
+    const recipientDoc = recipient.document?.replace(/\D/g, '') ?? ''
+    if (recipientDoc && !isValidCPF(recipientDoc)) {
+      setCartingId(null)
+      toast('O CPF do cliente é inválido. Por favor, corrija os dados da resposta antes de enviar.', 'error')
+      return
+    }
+
     const { data: fnData, error: fnErr } = await supabase.functions.invoke('me-proxy', {
       body: { action: 'cart', payload },
     })
@@ -393,7 +414,7 @@ function EstoqueContent() {
     setSubmissions(p => p.map(s => s.id === row.id
       ? { ...s, me_cart_id: cartId, status: 'No Carrinho' }
       : s))
-    toast(`Adicionado ao carrinho ME — ID: ${cartId}`, 'success')
+    toast('Prêmio enviado com sucesso para o carrinho do Melhor Envio!', 'success')
   }
 
   async function syncTracking(row: Submission) {
