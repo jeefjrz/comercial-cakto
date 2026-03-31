@@ -182,12 +182,14 @@ export default function PublicForm({ customDomain }: Props) {
       return
     }
 
-    // Increment response count (non-blocking)
-    supabase.rpc('increment_responses', { form_id: form.id }).catch(() => {
-      supabase.from('forms').select('responses').eq('id', form.id).single().then(({ data: r }) => {
-        if (r) supabase.from('forms').update({ responses: (r.responses || 0) + 1 }).eq('id', form.id)
-      })
-    })
+    // Increment response count (non-blocking, fire-and-forget)
+    void (async () => {
+      const { error: rpcErr } = await supabase.rpc('increment_responses', { form_id: form.id })
+      if (rpcErr) {
+        const { data: r } = await supabase.from('forms').select('responses').eq('id', form.id).single()
+        if (r) await supabase.from('forms').update({ responses: (r.responses || 0) + 1 }).eq('id', form.id)
+      }
+    })()
 
     // Fire webhook (non-blocking)
     if (form.webhook) {
