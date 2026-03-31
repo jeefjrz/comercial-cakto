@@ -6,7 +6,10 @@ type FormField = {
   id: number; type: string; label: string
   placeholder?: string; required: boolean; options?: string
   width?: 'full' | 'half'
+  inventory_linked?: boolean
 }
+
+type InventoryItem = { id: string; name: string; qty: number }
 
 type DbForm = {
   id: string; name: string; color: string; background_image: string
@@ -94,6 +97,7 @@ export default function PublicForm({ customDomain }: Props) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [inventory, setInventory] = useState<InventoryItem[]>([])
 
   useEffect(() => {
     console.log('[PublicForm] Hostname atual:', window.location.hostname)
@@ -138,6 +142,14 @@ export default function PublicForm({ customDomain }: Props) {
         setError('Este formulário não está disponível.'); setLoading(false); return
       }
       setForm(data as DbForm)
+
+      // Fetch inventory for linked Select fields (non-blocking if form has no linked fields)
+      const parsedFields: FormField[] = Array.isArray(data.fields) ? (data.fields as FormField[]) : []
+      if (parsedFields.some(f => f.inventory_linked)) {
+        const { data: inv } = await supabase.from('inventory').select('id,name,qty').order('name')
+        if (inv) setInventory(inv as InventoryItem[])
+      }
+
       setLoading(false)
     }
     load()
@@ -199,6 +211,18 @@ export default function PublicForm({ customDomain }: Props) {
       return
     }
 
+    // Stock check: verify inventory-linked fields still have qty > 0
+    const linkedFields = fields.filter(f => f.inventory_linked && f.type === 'Select')
+    for (const lf of linkedFields) {
+      const selectedName = values[String(lf.id)]
+      if (!selectedName) continue
+      const item = inventory.find(i => i.name === selectedName)
+      if (!item || item.qty <= 0) {
+        setError(`"${selectedName}" está esgotado. Por favor, escolha outro prêmio.`)
+        return
+      }
+    }
+
     // Validate email format
     const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
     const invalidEmail = fields.find(f => f.type === 'Email' && values[String(f.id)] && !emailRe.test(values[String(f.id)]))
@@ -226,6 +250,22 @@ export default function PublicForm({ customDomain }: Props) {
       setError('Erro ao enviar. Tente novamente.')
       setSubmitting(false)
       return
+    }
+
+    // Decrement inventory for linked Select fields (fire-and-forget with safety re-check)
+    for (const lf of linkedFields) {
+      const selectedName = values[String(lf.id)]
+      if (!selectedName) continue
+      const item = inventory.find(i => i.name === selectedName)
+      if (!item) continue
+      void (async () => {
+        const { data: fresh } = await supabase.from('inventory').select('qty').eq('id', item.id).single()
+        if (fresh && fresh.qty > 0) {
+          await supabase.from('inventory').update({ qty: fresh.qty - 1 }).eq('id', item.id)
+          // Update local inventory state to reflect new qty
+          setInventory(p => p.map(i => i.id === item.id ? { ...i, qty: i.qty - 1 } : i))
+        }
+      })()
     }
 
     // Fire webhook (non-blocking)
@@ -263,6 +303,26 @@ export default function PublicForm({ customDomain }: Props) {
     )
 
     if (f.type === 'Select') {
+      if (f.inventory_linked) {
+        const inStockItems = inventory.filter(i => i.qty > 0)
+        const outOfStock   = inventory.filter(i => i.qty <= 0)
+        return (
+          <div>
+            <CustomSelect
+              options={inStockItems.map(i => i.name)}
+              value={values[id] || ''}
+              onChange={v => setValues(p => ({ ...p, [id]: v }))}
+              placeholder={f.placeholder || 'Selecione um prêmio…'}
+              baseStyle={base}
+            />
+            {outOfStock.length > 0 && (
+              <div style={{ marginTop: 6, fontSize: 11, color: 'rgba(255,255,255,0.35)' }}>
+                Esgotados: {outOfStock.map(i => i.name).join(', ')}
+              </div>
+            )}
+          </div>
+        )
+      }
       const opts = (f.options || '').split(',').map(o => o.trim()).filter(Boolean)
       return (
         <CustomSelect

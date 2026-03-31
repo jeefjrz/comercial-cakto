@@ -24,6 +24,7 @@ type FormField = {
   required: boolean;
   options?: string; // comma-separated, only for Select
   width?: 'full' | 'half';
+  inventory_linked?: boolean; // Se true, opções carregadas do estoque em tempo real
 };
 
 type DbForm = {
@@ -278,14 +279,16 @@ function FormEditor({ form, onBack, onSave, isSaving }: {
   const [newFieldLabel, setNewFieldLabel]     = useState('');
   const [newFieldPlaceholder, setNewFieldPlaceholder] = useState('');
   const [newFieldOptions, setNewFieldOptions] = useState('');
-  const [newFieldWidth, setNewFieldWidth]     = useState<'full' | 'half'>('full');
+  const [newFieldWidth, setNewFieldWidth]               = useState<'full' | 'half'>('full');
+  const [newFieldInventoryLinked, setNewFieldInventoryLinked] = useState(false);
 
   // ── Edit field state ──
-  const [editingId, setEditingId]               = useState<number | null>(null);
-  const [editLabel, setEditLabel]               = useState('');
-  const [editPlaceholder, setEditPlaceholder]   = useState('');
-  const [editOptions, setEditOptions]           = useState('');
-  const [editWidth, setEditWidth]               = useState<'full' | 'half'>('full');
+  const [editingId, setEditingId]                     = useState<number | null>(null);
+  const [editLabel, setEditLabel]                     = useState('');
+  const [editPlaceholder, setEditPlaceholder]         = useState('');
+  const [editOptions, setEditOptions]                 = useState('');
+  const [editWidth, setEditWidth]                     = useState<'full' | 'half'>('full');
+  const [editInventoryLinked, setEditInventoryLinked] = useState(false);
 
   function addField() {
     if (!newFieldLabel) return;
@@ -295,8 +298,9 @@ function FormEditor({ form, onBack, onSave, isSaving }: {
       required: false,
       options: newFieldType === 'Select' ? newFieldOptions : undefined,
       width: newFieldWidth,
+      inventory_linked: newFieldType === 'Select' ? newFieldInventoryLinked : undefined,
     }]);
-    setNewFieldLabel(''); setNewFieldPlaceholder(''); setNewFieldOptions(''); setNewFieldWidth('full');
+    setNewFieldLabel(''); setNewFieldPlaceholder(''); setNewFieldOptions(''); setNewFieldWidth('full'); setNewFieldInventoryLinked(false);
     setAddingField(false);
   }
 
@@ -306,11 +310,12 @@ function FormEditor({ form, onBack, onSave, isSaving }: {
     setEditPlaceholder(f.placeholder || '');
     setEditOptions(f.options || '');
     setEditWidth(f.width || 'full');
+    setEditInventoryLinked(f.inventory_linked ?? false);
   }
 
   function saveEdit() {
     setFields(p => p.map(f => f.id === editingId
-      ? { ...f, label: editLabel, placeholder: editPlaceholder || undefined, options: f.type === 'Select' ? editOptions : f.options, width: editWidth }
+      ? { ...f, label: editLabel, placeholder: editPlaceholder || undefined, options: f.type === 'Select' ? editOptions : f.options, width: editWidth, inventory_linked: f.type === 'Select' ? editInventoryLinked : undefined }
       : f
     ));
     setEditingId(null);
@@ -492,9 +497,18 @@ function FormEditor({ form, onBack, onSave, isSaving }: {
                               </Field>
                             )}
                             {f.type === 'Select' && (
-                              <Field label="Opções (separadas por vírgula)">
-                                <input className="inp" value={editOptions} onChange={e => setEditOptions(e.target.value)} placeholder="Opção 1, Opção 2, Opção 3" />
-                              </Field>
+                              <>
+                                <Field label="Opções (separadas por vírgula)">
+                                  <input className="inp" value={editOptions} onChange={e => setEditOptions(e.target.value)}
+                                    placeholder="Opção 1, Opção 2, Opção 3" disabled={editInventoryLinked}
+                                    style={{ opacity: editInventoryLinked ? 0.4 : 1 }} />
+                                </Field>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                  <Toggle value={editInventoryLinked} onChange={() => setEditInventoryLinked(p => !p)} />
+                                  <span style={{ fontSize: 13 }}>Vincular ao Estoque</span>
+                                  <span style={{ fontSize: 11, color: 'var(--text2)' }}>— opções carregadas do inventário em tempo real</span>
+                                </div>
+                              </>
                             )}
                             <Field label="Largura do Campo">
                               <div style={{ display: 'flex', gap: 8 }}>
@@ -519,7 +533,7 @@ function FormEditor({ form, onBack, onSave, isSaving }: {
                           <div style={{ flex: 1 }}>
                             <div style={{ fontWeight: 600, fontSize: 13 }}>{f.label}</div>
                             <div style={{ fontSize: 11, color: 'var(--text2)' }}>
-                              {f.type}{f.required ? ' · Obrigatório' : ''}{f.type === 'Select' && f.options ? ` · ${f.options.split(',').length} opções` : ''}{f.width === 'half' ? ' · Metade' : ' · Largura Total'}
+                              {f.type}{f.required ? ' · Obrigatório' : ''}{f.type === 'Select' && f.options && !f.inventory_linked ? ` · ${f.options.split(',').length} opções` : ''}{f.inventory_linked ? ' · 📦 Estoque' : ''}{f.width === 'half' ? ' · Metade' : ' · Largura Total'}
                             </div>
                           </div>
                           <Toggle value={f.required} onChange={() => toggleRequired(f.id)} />
@@ -552,9 +566,18 @@ function FormEditor({ form, onBack, onSave, isSaving }: {
                       </Field>
                     )}
                     {newFieldType === 'Select' && (
-                      <Field label="Opções (separadas por vírgula)">
-                        <input className="inp" value={newFieldOptions} onChange={e => setNewFieldOptions(e.target.value)} placeholder="Opção 1, Opção 2, Opção 3" />
-                      </Field>
+                      <>
+                        <Field label="Opções (separadas por vírgula)">
+                          <input className="inp" value={newFieldOptions} onChange={e => setNewFieldOptions(e.target.value)}
+                            placeholder="Opção 1, Opção 2, Opção 3" disabled={newFieldInventoryLinked}
+                            style={{ opacity: newFieldInventoryLinked ? 0.4 : 1 }} />
+                        </Field>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <Toggle value={newFieldInventoryLinked} onChange={() => setNewFieldInventoryLinked(p => !p)} />
+                          <span style={{ fontSize: 13 }}>Vincular ao Estoque</span>
+                          <span style={{ fontSize: 11, color: 'var(--text2)' }}>— opções carregadas do inventário em tempo real</span>
+                        </div>
+                      </>
                     )}
                     <Field label="Largura do Campo">
                       <div style={{ display: 'flex', gap: 8 }}>
