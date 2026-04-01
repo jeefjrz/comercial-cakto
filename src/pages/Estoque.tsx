@@ -535,12 +535,6 @@ function EstoqueContent() {
     const code = tracking
     if (!code) { toast('Pedido localizado, etiqueta ainda não gerada/paga no ME.', 'info'); return }
 
-    // Só persiste APÓS código real recebido
-    const { error: dbErr } = await supabase.from('form_submissions')
-      .update({ tracking_code: code, status: 'Em Trânsito' })
-      .eq('id', row.id)
-    if (dbErr) { toast(dbErr.message, 'error'); return }
-
     toast(`Rastreio sincronizado: ${code}`, 'success')
     // Dispara webhook WhatsApp automaticamente (individual apenas)
     void triggerWhatsAppWebhook(row, code)
