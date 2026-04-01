@@ -73,6 +73,16 @@ function trackingUrl(code: string, carrier: string): string {
   return `https://melhorrastreio.com.br/rastreio/${code}`
 }
 
+/** Retorna apenas o sufixo do link Melhor Rastreio (ex: /jadlog/123 ou /correios/AB123).
+ *  A Meta exige somente o sufixo em botões de link dinâmico no WhatsApp. */
+function meTrackingPath(code: string, carrier: string): string {
+  const c = (carrier ?? '').toLowerCase()
+  const slug = c.includes('jadlog') ? 'jadlog'
+    : c.includes('correio') ? 'correios'
+    : c.replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '') || 'correios'
+  return `/${slug}/${code}`
+}
+
 /** Returns package dimensions/weight based on meta milestone */
 function getDimensions(meta: string) {
   const m = (meta ?? '').toLowerCase().replace(/[\s.]/g, '')
@@ -471,7 +481,7 @@ function EstoqueContent() {
       cpf:           String(cpf).replace(/\D/g, ''),
       email:         r.email,
       rastreio:      trackingCode,
-      link_rastreio: `https://melhorrastreio.com.br/rastreio/${trackingCode}`,
+      link_rastreio: meTrackingPath(trackingCode, row.carrier || ''),
     }
     try {
       await fetch(webhookWa, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
