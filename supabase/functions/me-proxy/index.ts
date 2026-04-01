@@ -165,35 +165,43 @@ serve(async (req) => {
         if (tStatus === 200 && tData && typeof tData === 'object') {
           const entry = (tData as Record<string, unknown>)[cleanCartId] as Record<string, unknown> | undefined
           if (entry) {
-            const tracking = entry.tracking ? String(entry.tracking) : ''
+            // Prefere tracking oficial; fallback para melhorenvio_tracking (etiqueta gerada mas não paga)
+            const tracking = entry.tracking
+              ? String(entry.tracking)
+              : (entry.melhorenvio_tracking ? String(entry.melhorenvio_tracking) : '')
             const meStatus = ME_STATUS_MAP[String(entry.status ?? '')] ?? 'Em Trânsito'
-            return new Response(JSON.stringify({ found: true, me_cart_id: cleanCartId, tracking, status: meStatus }), {
-              status: 200, headers: { ...CORS, 'Content-Type': 'application/json' },
-            })
+            // Só retorna do Caminho A se tiver tracking; senão cai no B para buscar via CPF nos orders
+            if (tracking) {
+              return new Response(JSON.stringify({ found: true, me_cart_id: cleanCartId, tracking, status: meStatus }), {
+                status: 200, headers: { ...CORS, 'Content-Type': 'application/json' },
+              })
+            }
+            console.warn('[sync-tracking] entry encontrado mas sem tracking — fallback por CPF nos orders')
+          } else {
+            console.warn('[sync-tracking] me_cart_id ausente na resposta do ME — fallback por CPF')
           }
-          // Chave ausente na resposta → pedido apagado do ME — tenta fallback por CPF antes de resetar
-          console.warn('[sync-tracking] me_cart_id ausente na resposta do ME — tentando fallback por CPF')
         } else {
-          // ME retornou erro (4xx/5xx) — não bloqueia, cai no fallback por CPF
           console.warn(`[sync-tracking] /shipment/tracking retornou ${tStatus} — fallback por CPF`)
         }
       }
 
-      // Caminho B: sem me_cart_id OU Caminho A falhou → busca nos últimos 300 pedidos por documento
+      // Caminho B: sem me_cart_id OU Caminho A não encontrou tracking → busca nos orders por documento
       if (!cleanDoc) {
-        // Sem CPF e Caminho A não achou → reseta carrinho
         console.warn('[sync-tracking] sem documento para fallback — reset')
         return new Response(JSON.stringify({ found: false, reset: !!cleanCartId }), {
           status: 200, headers: { ...CORS, 'Content-Type': 'application/json' },
         })
       }
 
+      // Filtra por status que têm etiqueta gerada/postada para cobrir pedidos antigos
+      const statusFilter = ['released', 'released_waiting', 'posted', 'in_transit', 'delivered', 'delivered_to_agency', 'with_carrier', 'out_for_delivery']
+        .map(s => `status[]=${s}`).join('&')
       console.log(`[sync-tracking] fallback por documento: ${cleanDoc}`)
       const pages = await Promise.all([1, 2, 3].map(page =>
-        meJson(`${ME_API}/orders?per_page=100&page=${page}&orderBy=created_at&sortedBy=desc`)
+        meJson(`${ME_API}/orders?per_page=100&page=${page}&orderBy=created_at&sortedBy=desc&${statusFilter}`)
       ))
       const orders = pages.flatMap(p => p.data?.data ?? []) as Record<string, unknown>[]
-      console.log(`[sync-tracking] varredura: ${orders.length} pedidos`)
+      console.log(`[sync-tracking] varredura com filtro de status: ${orders.length} pedidos`)
 
       const match = orders.find(o =>
         sanitizeDoc((o.to as Record<string, unknown>)?.document) === cleanDoc
