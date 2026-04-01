@@ -37,7 +37,7 @@ type CallItem = {
   notes:         string
 }
 
-const EMPTY_FORM = { title: '', date: '', time: '', responsibleId: '', status: 'Agendada', notes: '' };
+const EMPTY_FORM = { title: '', date: '', time: '', responsibleId: '', status: 'Agendada', notes: '', clientEmail: '' };
 
 export default function AgendaPage() {
   const { user, loading } = useAuth();
@@ -60,10 +60,11 @@ function AgendaContent() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving]   = useState(false);
 
-  const [modal, setModal]       = useState(false);
-  const [sheetCall, setSheetCall] = useState<CallItem | null>(null);
-  const [editCall, setEditCall]   = useState<CallItem | null>(null);
-  const [form, setForm] = useState({ ...EMPTY_FORM });
+  const [modal, setModal]             = useState(false);
+  const [sheetCall, setSheetCall]     = useState<CallItem | null>(null);
+  const [editCall, setEditCall]       = useState<CallItem | null>(null);
+  const [form, setForm]               = useState({ ...EMPTY_FORM });
+  const [closerModal, setCloserModal] = useState<{ id: string; name: string } | null>(null);
 
   // ── Fetch ──────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -149,15 +150,16 @@ function AgendaContent() {
       setCalls(p => [newCall, ...p]);
       toast('Call agendada!', 'success');
 
-      // Sincroniza com o Google Calendar Mestre via Service Account
+      // Sincroniza com o Google Calendar via OAuth Refresh Token
       supabase.functions.invoke('schedule-call', {
         body: {
-          title: form.title,
-          date: form.date,
-          time: form.time || '09:00',
-          closerName: user?.name || responsibleName,
+          title:       form.title,
+          date:        form.date,
+          time:        form.time || '09:00',
+          closerName:  responsibleName,
           closerEmail: user?.email || '',
-          notes: form.notes,
+          clientEmail: form.clientEmail || '',
+          notes:       form.notes,
         },
       }).then(({ error: fnErr }) => {
         if (fnErr) toast('Call salva, mas falhou no Google Calendar', 'error');
@@ -180,7 +182,7 @@ function AgendaContent() {
   const closerStats = closers.map(u => {
     const uCalls = calls.filter(c => c.responsibleId === u.id);
     const done   = uCalls.filter(c => c.status === 'Realizada').length;
-    return { name: u.name, total: uCalls.length, done, rate: uCalls.length ? Math.round((done / uCalls.length) * 100) : 0 };
+    return { id: u.id, name: u.name, total: uCalls.length, done, rate: uCalls.length ? Math.round((done / uCalls.length) * 100) : 0 };
   });
 
   if (isLoading) {
@@ -201,9 +203,24 @@ function AgendaContent() {
     <>
       <Header />
       <div className="page-wrap">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
           <h1 style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-.02em' }}>Agenda</h1>
           <Button icon={Plus} onClick={openNew}>Nova Call</Button>
+        </div>
+
+        {/* ── Dashboard KPIs ──────────────────────────────────────────────── */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(155px, 1fr))', gap: 12, marginBottom: 20 }}>
+          {([
+            { label: 'Agendadas',  value: calls.filter(c => c.status === 'Agendada').length,  color: 'var(--action)' },
+            { label: 'Realizadas', value: calls.filter(c => c.status === 'Realizada').length, color: 'var(--green)'  },
+            { label: 'Canceladas', value: calls.filter(c => c.status === 'Cancelada').length, color: 'var(--red)'    },
+            { label: 'No-show',    value: calls.filter(c => c.status === 'No-show').length,   color: 'var(--orange)' },
+          ] as { label: string; value: number; color: string }[]).map(k => (
+            <div key={k.label} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16 }}>
+              <div style={{ fontSize: 28, fontWeight: 800, color: k.color }}>{k.value}</div>
+              <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 4 }}>{k.label}</div>
+            </div>
+          ))}
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 20 }}>
@@ -278,16 +295,23 @@ function AgendaContent() {
           </div>
         </div>
 
-        {/* Closer Performance */}
+        {/* ── Performance por Closer (cards clicáveis) ────────────────────── */}
         {closerStats.length > 0 && (
           <div style={{ marginTop: 20, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 24 }}>
             <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 16 }}>Performance por Closer</div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
               {closerStats.map(c => (
-                <div key={c.name} style={{ background: 'var(--bg-card2)', borderRadius: 12, padding: 16 }}>
+                <div key={c.name} onClick={() => setCloserModal({ id: c.id, name: c.name })}
+                  style={{ background: 'var(--bg-card2)', borderRadius: 12, padding: 16, cursor: 'pointer',
+                    border: '1px solid transparent', transition: 'border .15s' }}
+                  onMouseEnter={e => (e.currentTarget.style.border = '1px solid var(--action)')}
+                  onMouseLeave={e => (e.currentTarget.style.border = '1px solid transparent')}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
                     <Avatar name={c.name} size={34} />
-                    <div style={{ fontWeight: 600, fontSize: 13 }}>{c.name.split(' ')[0]}</div>
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: 13 }}>{c.name.split(' ')[0]}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text2)' }}>{c.total} call{c.total !== 1 ? 's' : ''}</div>
+                    </div>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--text2)', marginBottom: 6 }}>
                     <span>{c.done}/{c.total} realizadas</span>
@@ -324,6 +348,11 @@ function AgendaContent() {
               <Sel value={form.status} onChange={v => setForm({ ...form, status: v })}
                 options={['Agendada', 'Realizada', 'Cancelada', 'No-show']} placeholder="Status" />
             </Field>
+            <Field label="E-mail do Cliente">
+              <input className="inp" type="email" value={form.clientEmail}
+                onChange={e => setForm({ ...form, clientEmail: e.target.value })}
+                placeholder="cliente@email.com (opcional)" />
+            </Field>
             <Field label="Observações">
               <textarea className="inp" rows={3} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} placeholder="Notas sobre a call..." style={{ resize: 'vertical' }} />
             </Field>
@@ -331,6 +360,59 @@ function AgendaContent() {
               <Button variant="secondary" onClick={() => setModal(false)}>Cancelar</Button>
               <Button onClick={saveCall} disabled={isSaving}>{editCall ? (isSaving ? 'Salvando…' : 'Salvar') : (isSaving ? 'Agendando…' : 'Agendar')}</Button>
             </div>
+          </div>
+        </Modal>
+
+        {/* ── Modal: Calls do Closer ──────────────────────────────────────────── */}
+        <Modal open={closerModal !== null} onClose={() => setCloserModal(null)}
+          title={`Calls — ${closerModal?.name ?? ''}`}>
+          <div style={{ maxHeight: '65vh', overflowY: 'auto' }}>
+            {(() => {
+              const closerCalls = calls.filter(c => c.responsibleId === closerModal?.id)
+                .sort((a, b) => b.date.localeCompare(a.date))
+              if (closerCalls.length === 0) return (
+                <div style={{ textAlign: 'center', color: 'var(--text2)', padding: 32, fontSize: 13 }}>
+                  Nenhuma call registrada.
+                </div>
+              )
+              return (
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                  <thead>
+                    <tr>
+                      {['Data', 'Hora', 'Título', 'Status'].map(h => (
+                        <th key={h} style={{ padding: '8px 12px', textAlign: 'left', fontSize: 11, fontWeight: 700,
+                          color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.06em',
+                          borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {closerCalls.map((c, i) => (
+                      <tr key={c.id} style={{ background: i % 2 === 0 ? 'var(--bg-card)' : 'var(--bg-card2)', cursor: 'pointer' }}
+                        onClick={() => { setCloserModal(null); setSheetCall(c) }}>
+                        <td style={{ padding: '9px 12px', whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)' }}>
+                          {new Date(c.date).toLocaleDateString('pt-BR')}
+                        </td>
+                        <td style={{ padding: '9px 12px', whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)' }}>
+                          {c.time}
+                        </td>
+                        <td style={{ padding: '9px 12px', borderBottom: '1px solid var(--border)', fontWeight: 600 }}>
+                          {c.title}
+                        </td>
+                        <td style={{ padding: '9px 12px', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
+                          <span style={{ background: `color-mix(in srgb, ${CALL_STATUS_COLORS[c.status] || 'var(--text2)'} 15%, var(--bg-card2))`,
+                            color: CALL_STATUS_COLORS[c.status] || 'var(--text2)',
+                            border: `1px solid ${CALL_STATUS_COLORS[c.status] || 'var(--border)'}`,
+                            borderRadius: 20, padding: '2px 9px', fontSize: 11, fontWeight: 700 }}>
+                            {c.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )
+            })()}
           </div>
         </Modal>
 
