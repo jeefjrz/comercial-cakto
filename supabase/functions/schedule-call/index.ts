@@ -1,6 +1,6 @@
 // @ts-nocheck
 // Supabase Edge Function — schedule-call
-// CRUD no Google Calendar com Meet automático e cores por Closer.
+// CRUD no Google Calendar com Meet automático, convidados e cores por Closer.
 // Secrets: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN, GOOGLE_CALENDAR_ID
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
@@ -9,6 +9,8 @@ const CORS = {
   'Access-Control-Allow-Origin':  '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
+
+const ADMIN_EMAIL = 'jeferson@cakto.com.br'
 
 async function getAccessToken(): Promise<string> {
   const clientId     = Deno.env.get('GOOGLE_CLIENT_ID')     ?? ''
@@ -60,18 +62,23 @@ serve(async (req) => {
       const { google_event_id } = body
       if (!google_event_id) return err500('google_event_id obrigatório para delete.')
       const res = await fetch(`${calBase}/${google_event_id}`, { method: 'DELETE', headers: authHdr })
-      if (!res.ok && res.status !== 410) {
-        return err500(await res.text())
-      }
+      if (!res.ok && res.status !== 410) return err500(await res.text())
       return json({ deleted: true })
     }
 
     // ── Monta evento (CREATE / UPDATE) ────────────────────────────────────────
-    const { title, date, time, closerName, closerEmail, clientEmail, notes } = body
-    const timeStr = time || '09:00'
-    const [h, m]  = timeStr.split(':').map(Number)
-    const endH    = String(h + 1).padStart(2, '0')
+    const { title, date, time, end_time, closerName, closerEmail, clientEmail, notes } = body
     const tz      = '-03:00'
+    const timeStr = time || '09:00'
+
+    // Hora de término: usa end_time do payload ou +1h como fallback
+    let endStr: string
+    if (end_time && end_time !== timeStr) {
+      endStr = end_time
+    } else {
+      const [h, m] = timeStr.split(':').map(Number)
+      endStr = `${String(h + 1).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+    }
 
     const descLines = [
       `Closer: ${closerName ?? ''}${closerEmail ? ` <${closerEmail}>` : ''}`,
@@ -79,12 +86,17 @@ serve(async (req) => {
       notes ? `\n${notes}` : '',
     ].filter(Boolean).join('\n')
 
+    // Convidados: sempre o admin + o cliente (se informado)
+    const attendees: { email: string }[] = [{ email: ADMIN_EMAIL }]
+    if (clientEmail) attendees.push({ email: clientEmail })
+
     const event = {
       summary:     title,
       description: descLines.trim(),
       colorId:     closerColorId(closerName ?? ''),
+      attendees,
       start: { dateTime: `${date}T${timeStr}:00${tz}`, timeZone: 'America/Sao_Paulo' },
-      end:   { dateTime: `${date}T${endH}:${String(m).padStart(2, '0')}:00${tz}`, timeZone: 'America/Sao_Paulo' },
+      end:   { dateTime: `${date}T${endStr}:00${tz}`,  timeZone: 'America/Sao_Paulo' },
       conferenceData: {
         createRequest: {
           requestId:             crypto.randomUUID(),
@@ -101,7 +113,7 @@ serve(async (req) => {
         method: 'PUT', headers: authHdr, body: JSON.stringify(event),
       })
       if (!res.ok) return err500(await res.text())
-      const updated = await res.json()
+      const updated  = await res.json()
       const meetLink = updated.conferenceData?.entryPoints?.find((e: any) => e.entryPointType === 'video')?.uri ?? null
       return json({ eventId: updated.id, htmlLink: updated.htmlLink, meetLink })
     }

@@ -39,12 +39,16 @@ function closerColor(name: string): string {
   return GCAL_COLORS[closerColorId(name)] ?? '#7986cb';
 }
 
+const DAYS_FULL = ['Domingo','Segunda-feira','Terça-feira','Quarta-feira','Quinta-feira','Sexta-feira','Sábado'];
+const MONTHS_PT = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
+
 type DbUser  = { id: string; name: string; role: string }
 type CallItem = {
   id:              string
   title:           string
   date:            string
   time:            string
+  endTime:         string
   responsibleId:   string
   responsible:     string
   status:          string
@@ -54,7 +58,20 @@ type CallItem = {
   meet_link:       string
 }
 
-const EMPTY_FORM = { title: '', date: '', time: '', responsibleId: '', status: 'Agendada', notes: '', clientEmail: '' };
+function formatInviteText(call: CallItem): string {
+  const d       = new Date(call.date + 'T12:00:00');
+  const dayName = DAYS_FULL[d.getDay()];
+  const day     = d.getDate();
+  const month   = MONTHS_PT[d.getMonth()];
+  const range   = call.endTime ? `${call.time} – ${call.endTime}` : call.time;
+  let text = `${call.title}\n\n${dayName}, ${day} de ${month} · ${range}\nFuso horário: America/Sao_Paulo`;
+  if (call.meet_link) {
+    text += `\n\nComo participar do Google Meet\nLink da videochamada: ${call.meet_link}`;
+  }
+  return text;
+}
+
+const EMPTY_FORM = { title: '', date: '', time: '', endTime: '', responsibleId: '', status: 'Agendada', notes: '', clientEmail: '' };
 
 export default function AgendaPage() {
   const { user, loading } = useAuth();
@@ -90,7 +107,7 @@ function AgendaContent() {
       setIsLoading(true);
       const [{ data: dbCalls, error: ce }, { data: dbUsers, error: ue }] = await Promise.all([
         supabase.from('calls')
-          .select('id,title,date,time,responsible,status,notes,client_email,google_event_id,meet_link')
+          .select('id,title,date,time,end_time,responsible,status,notes,client_email,google_event_id,meet_link')
           .order('date').order('time'),
         supabase.from('users').select('id,name,role').order('name'),
       ]);
@@ -105,6 +122,7 @@ function AgendaContent() {
           title:           c.title,
           date:            c.date,
           time:            (c.time as string)?.slice(0, 5) || '',
+          endTime:         (c.end_time as string)?.slice(0, 5) || '',
           responsibleId:   c.responsible,
           responsible:     userList.find(u => u.id === c.responsible)?.name || '?',
           status:          c.status,
@@ -144,7 +162,7 @@ function AgendaContent() {
 
   function openEdit(call: CallItem) {
     setEditCall(call);
-    setForm({ title: call.title, date: call.date, time: call.time, responsibleId: call.responsibleId, status: call.status, notes: call.notes, clientEmail: call.clientEmail || '' });
+    setForm({ title: call.title, date: call.date, time: call.time, endTime: call.endTime || '', responsibleId: call.responsibleId, status: call.status, notes: call.notes, clientEmail: call.clientEmail || '' });
     setSheetCall(null);
     setModal(true);
   }
@@ -161,6 +179,7 @@ function AgendaContent() {
         title:        form.title,
         date:         form.date,
         time:         form.time || '00:00',
+        end_time:     form.endTime || '',
         responsible:  form.responsibleId,
         status:       form.status as CallStatus,
         notes:        form.notes,
@@ -170,7 +189,7 @@ function AgendaContent() {
       setIsSaving(false);
       if (error) { toast(error.message, 'error'); return; }
       setCalls(p => p.map(c => c.id === editCall.id
-        ? { ...c, ...patch, responsibleId: form.responsibleId, responsible: responsibleName, time: form.time, clientEmail: form.clientEmail }
+        ? { ...c, ...patch, responsibleId: form.responsibleId, responsible: responsibleName, time: form.time, endTime: form.endTime, clientEmail: form.clientEmail }
         : c));
       setModal(false);
       toast('Call atualizada!', 'success');
@@ -179,7 +198,7 @@ function AgendaContent() {
         supabase.functions.invoke('schedule-call', {
           body: {
             action: 'update', google_event_id: editCall.google_event_id,
-            title: form.title, date: form.date, time: form.time || '09:00',
+            title: form.title, date: form.date, time: form.time || '09:00', end_time: form.endTime || '',
             closerName: responsibleName, closerEmail: user?.email || '',
             clientEmail: form.clientEmail || '', notes: form.notes,
           },
@@ -193,6 +212,7 @@ function AgendaContent() {
         title:        form.title,
         date:         form.date,
         time:         form.time || '00:00',
+        end_time:     form.endTime || '',
         responsible:  form.responsibleId,
         status:       form.status as CallStatus,
         notes:        form.notes,
@@ -202,7 +222,7 @@ function AgendaContent() {
       setIsSaving(false);
       if (error) { toast(error.message, 'error'); return; }
       const newCall: CallItem = {
-        id: (data as any).id, title: form.title, date: form.date, time: form.time,
+        id: (data as any).id, title: form.title, date: form.date, time: form.time, endTime: form.endTime,
         responsibleId: form.responsibleId, responsible: responsibleName,
         status: form.status, notes: form.notes, clientEmail: form.clientEmail,
         google_event_id: '', meet_link: '',
@@ -214,7 +234,7 @@ function AgendaContent() {
       supabase.functions.invoke('schedule-call', {
         body: {
           action: 'create',
-          title: form.title, date: form.date, time: form.time || '09:00',
+          title: form.title, date: form.date, time: form.time || '09:00', end_time: form.endTime || '',
           closerName: responsibleName, closerEmail: user?.email || '',
           clientEmail: form.clientEmail || '', notes: form.notes,
         },
@@ -436,12 +456,15 @@ function AgendaContent() {
             <Field label="Título">
               <input className="inp" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="Ex: Discovery Call – João" />
             </Field>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
               <Field label="Data">
                 <input className="inp" type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} />
               </Field>
-              <Field label="Horário">
+              <Field label="Hora Início">
                 <input className="inp" type="time" value={form.time} onChange={e => setForm({ ...form, time: e.target.value })} />
+              </Field>
+              <Field label="Hora Fim">
+                <input className="inp" type="time" value={form.endTime} onChange={e => setForm({ ...form, endTime: e.target.value })} />
               </Field>
             </div>
             <Field label="Responsável (Closer)">
@@ -542,6 +565,28 @@ function AgendaContent() {
                   <Video size={16} /> Entrar no Google Meet
                 </a>
               )}
+
+              {/* Bloco de cópia para WhatsApp */}
+              {(() => {
+                const inviteText = formatInviteText(sheetCall);
+                return (
+                  <div style={{ background: 'var(--bg-card2)', borderRadius: 10, padding: 14 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                      <div style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em' }}>
+                        Convite para copiar
+                      </div>
+                      <button onClick={() => { navigator.clipboard.writeText(inviteText); toast('Copiado!', 'success'); }}
+                        style={{ background: 'var(--action)', color: '#fff', border: 'none', borderRadius: 6,
+                          padding: '4px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+                        Copiar
+                      </button>
+                    </div>
+                    <pre style={{ margin: 0, fontSize: 12, lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--text)' }}>
+                      {inviteText}
+                    </pre>
+                  </div>
+                );
+              })()}
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                 <div style={{ background: 'var(--bg-card2)', borderRadius: 10, padding: 14 }}>
