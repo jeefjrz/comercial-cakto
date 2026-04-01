@@ -70,21 +70,63 @@ serve(async (req) => {
 
     // ── 1. Adicionar ao carrinho ─────────────────────────────────────────────
     if (action === 'cart') {
+      const fromAddr = {
+        name:        ME_FROM_NAME,
+        email:       ME_FROM_EMAIL,
+        document:    ME_FROM_DOC,
+        phone:       ME_FROM_PHONE  || undefined,
+        postal_code: ME_FROM_POSTAL || undefined,
+        address:     ME_FROM_ADDR   || undefined,
+        number:      ME_FROM_NUM    || undefined,
+        district:    ME_FROM_DIST   || undefined,
+        city:        ME_FROM_CITY   || undefined,
+        state_abbr:  ME_FROM_STATE  || undefined,
+        country_id:  'BR',
+      }
+
+      // Cota frete e escolhe o mais barato entre Correios (id=1) e Jadlog (id=2)
+      const toPostal  = (payload.to as Record<string, string>)?.postal_code ?? ''
+      const volumes   = (payload.volumes as Record<string, number>[]) ?? [{ height: 18, width: 30, length: 35, weight: 3 }]
+      const calcPayload = {
+        from: { postal_code: ME_FROM_POSTAL },
+        to:   { postal_code: toPostal },
+        volumes,
+      }
+
+      let serviceId = 1 // fallback: PAC Correios
+      try {
+        const { status: calcStatus, data: calcData } = await meJson(`${ME_API}/shipment/calculate`, {
+          method: 'POST',
+          body:   JSON.stringify(calcPayload),
+        })
+        if (calcStatus === 200 && Array.isArray(calcData)) {
+          // Filtra Correios (company.id=1) e Jadlog (company.id=2), sem erros
+          const eligible = calcData.filter((s: Record<string, unknown>) =>
+            !s.error &&
+            typeof s.price === 'number' &&
+            (s.company as Record<string, unknown>)?.id === 1 ||
+            (!s.error && typeof s.price === 'number' && (s.company as Record<string, unknown>)?.id === 2)
+          )
+          if (eligible.length > 0) {
+            const cheapest = eligible.reduce((a: Record<string, unknown>, b: Record<string, unknown>) =>
+              (a.price as number) <= (b.price as number) ? a : b
+            )
+            serviceId = cheapest.id as number
+            console.log(`[cart] serviço escolhido: id=${serviceId} price=${cheapest.price} company=${(cheapest.company as Record<string, unknown>)?.name}`)
+          } else {
+            console.warn('[cart] nenhum serviço elegível — usando fallback PAC (id=1)')
+          }
+        } else {
+          console.warn(`[cart] calculadora retornou ${calcStatus} — usando fallback PAC (id=1)`)
+        }
+      } catch (e) {
+        console.error('[cart] erro na cotação:', e, '— usando fallback PAC (id=1)')
+      }
+
       const cartPayload = {
         ...payload,
-        from: {
-          name:        ME_FROM_NAME,
-          email:       ME_FROM_EMAIL,
-          document:    ME_FROM_DOC,
-          phone:       ME_FROM_PHONE  || undefined,
-          postal_code: ME_FROM_POSTAL || undefined,
-          address:     ME_FROM_ADDR   || undefined,
-          number:      ME_FROM_NUM    || undefined,
-          district:    ME_FROM_DIST   || undefined,
-          city:        ME_FROM_CITY   || undefined,
-          state_abbr:  ME_FROM_STATE  || undefined,
-          country_id:  'BR',
-        },
+        service: serviceId,
+        from:    fromAddr,
       }
       const { status, data } = await meJson(`${ME_API}/cart`, {
         method: 'POST',
