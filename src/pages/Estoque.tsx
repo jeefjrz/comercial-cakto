@@ -485,7 +485,35 @@ function EstoqueContent() {
   }
 
   async function syncTracking(row: Submission) {
-    if (!row.me_cart_id) { toast('Sem me_cart_id — gere no carrinho primeiro.', 'error'); return }
+    // Fallback: sem me_cart_id → busca pedido por CPF nos últimos 100 envios do ME
+    if (!row.me_cart_id) {
+      const cpf = Object.values(row.data).map(v => String(v).replace(/\D/g, '')).find(v => v.length === 11) ?? ''
+      if (!cpf) { toast('CPF não encontrado nos dados do cliente.', 'error'); return }
+      setSyncingId(row.id)
+      const { data: fnData, error: fnErr } = await supabase.functions.invoke('me-proxy', {
+        body: { action: 'find-order', payload: { cpf } },
+      })
+      setSyncingId(null)
+      if (fnErr || fnData?.error) {
+        toast('Não foi possível localizar o pedido no Melhor Envio.', 'error')
+        return
+      }
+      if (!fnData?.found) { toast('Nenhum pedido encontrado para este CPF no ME.', 'info'); return }
+
+      const { me_cart_id, tracking, status: meStatus } = fnData as { me_cart_id: string; tracking: string; status: string }
+      const patch: Record<string, string> = { me_cart_id, status: meStatus }
+      if (tracking) patch.tracking_code = tracking
+      const { error: dbErr } = await supabase.from('form_submissions').update(patch).eq('id', row.id)
+      if (dbErr) { toast(dbErr.message, 'error'); return }
+      setSubmissions(p => p.map(s => s.id === row.id ? { ...s, ...patch } : s))
+      if (tracking) {
+        toast(`Pedido localizado! Rastreio: ${tracking}`, 'success')
+        void triggerWhatsAppWebhook(row, tracking)
+      } else {
+        toast('Pedido localizado no ME mas etiqueta ainda não gerada.', 'info')
+      }
+      return
+    }
     setSyncingId(row.id)
 
     const { data: fnData, error: fnErr } = await supabase.functions.invoke('me-proxy', {
@@ -865,20 +893,19 @@ function EstoqueContent() {
                                   <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
                                 </svg>
                               </a>
-                            ) : row.me_cart_id ? (
+                            ) : (
                               <button onClick={() => syncTracking(row)} disabled={syncingId === row.id}
                                 style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'none',
-                                  border: `1px solid ${syncingId === row.id ? 'var(--border)' : 'var(--action)'}`,
+                                  border: `1px solid ${syncingId === row.id ? 'var(--border)' : row.me_cart_id ? 'var(--action)' : 'var(--text2)'}`,
                                   borderRadius: 20, padding: '3px 10px', cursor: syncingId === row.id ? 'default' : 'pointer',
-                                  fontSize: 11, fontWeight: 700, color: syncingId === row.id ? 'var(--text2)' : 'var(--action)',
+                                  fontSize: 11, fontWeight: 700,
+                                  color: syncingId === row.id ? 'var(--text2)' : row.me_cart_id ? 'var(--action)' : 'var(--text2)',
                                   opacity: syncingId === row.id ? 0.6 : 1, transition: 'opacity .15s' }}>
                                 {syncingId === row.id
                                   ? <Loader2 size={10} style={{ animation: 'spin 1s linear infinite' }} />
                                   : <RefreshCw size={10} />}
-                                {syncingId === row.id ? 'Buscando…' : 'Sincronizar'}
+                                {syncingId === row.id ? 'Buscando…' : row.me_cart_id ? 'Sincronizar' : 'Buscar por CPF'}
                               </button>
-                            ) : (
-                              <span style={{ color: 'var(--text2)', fontStyle: 'italic', fontSize: 12 }}>Pendente</span>
                             )}
                           </td>
                           {/* Data */}
@@ -1144,28 +1171,43 @@ function EstoqueContent() {
 
         {/* ── Modal: Editar Envio (com gestão de estoque) ───────────────────── */}
         <Modal open={subEditRow !== null} onClose={() => setSubEditRow(null)} title="Editar Dados do Envio">
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {/* Status */}
-            <Field label="Status">
-              <select className="inp" value={subEditStatus} onChange={e => setSubEditStatus(e.target.value)}
-                style={{ color: STATUS_COLORS[subEditStatus] || 'var(--text)', fontWeight: 700 }}>
-                {SUB_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </Field>
+          {/* Corpo com scroll */}
+          <div style={{ maxHeight: '70vh', overflowY: 'auto', paddingRight: 4, display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {/* Status + Prêmio em 2 colunas */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <Field label="Status">
+                <select className="inp" value={subEditStatus} onChange={e => setSubEditStatus(e.target.value)}
+                  style={{ color: STATUS_COLORS[subEditStatus] || 'var(--text)', fontWeight: 700 }}>
+                  {SUB_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </Field>
+              <Field label="Prêmio Principal">
+                <select className="inp" value={subEditPremioId} onChange={e => setSubEditPremioId(e.target.value)}>
+                  <option value="">— Selecione —</option>
+                  {items.map(it => (
+                    <option key={it.id} value={it.id}>
+                      {it.name}{it.qty === 0 ? ' [SEM ESTOQUE]' : ` (${it.qty})`}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
 
-            {/* Prêmio Principal — dropdown do inventário */}
-            <Field label="Prêmio Principal">
-              <select className="inp" value={subEditPremioId} onChange={e => setSubEditPremioId(e.target.value)}>
-                <option value="">— Selecione um item do estoque —</option>
-                {items.map(it => (
-                  <option key={it.id} value={it.id}>
-                    {it.name}{it.qty === 0 ? ' [SEM ESTOQUE]' : ` (${it.qty} disponíveis)`}
-                  </option>
-                ))}
-              </select>
-            </Field>
+            {/* Rastreio + Transportadora em 2 colunas */}
+            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 12 }}>
+              <Field label="Código de Rastreio">
+                <input className="inp" value={subEditTracking}
+                  onChange={e => setSubEditTracking(e.target.value)}
+                  placeholder="Ex: BR123456789BR" />
+              </Field>
+              <Field label="Transportadora">
+                <input className="inp" value={subEditCarrier}
+                  onChange={e => setSubEditCarrier(e.target.value)}
+                  placeholder="Ex: Correios" />
+              </Field>
+            </div>
 
-            {/* Itens Extras */}
+            {/* Itens Extras — linha inteira */}
             <Field label="Itens Extras">
               <div style={{ display: 'flex', gap: 8 }}>
                 <select className="inp" value={subEditExtraSelect} onChange={e => setSubEditExtraSelect(e.target.value)} style={{ flex: 1 }}>
@@ -1179,9 +1221,7 @@ function EstoqueContent() {
                 <button onClick={addExtra} disabled={!subEditExtraSelect}
                   style={{ padding: '0 14px', background: 'var(--action)', color: '#fff', border: 'none',
                     borderRadius: 8, cursor: subEditExtraSelect ? 'pointer' : 'not-allowed', fontWeight: 700, fontSize: 13,
-                    opacity: subEditExtraSelect ? 1 : 0.5 }}>
-                  +
-                </button>
+                    opacity: subEditExtraSelect ? 1 : 0.5 }}>+</button>
               </div>
               {subEditExtras.length > 0 && (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
@@ -1202,20 +1242,6 @@ function EstoqueContent() {
               )}
             </Field>
 
-            {/* Rastreio */}
-            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 12 }}>
-              <Field label="Código de Rastreio">
-                <input className="inp" value={subEditTracking}
-                  onChange={e => setSubEditTracking(e.target.value)}
-                  placeholder="Ex: BR123456789BR" />
-              </Field>
-              <Field label="Transportadora">
-                <input className="inp" value={subEditCarrier}
-                  onChange={e => setSubEditCarrier(e.target.value)}
-                  placeholder="Ex: Correios" />
-              </Field>
-            </div>
-
             {/* Info: auto-promoção de status */}
             {subEditTracking.trim() && subEditStatus === 'Pendente' && (
               <div style={{ background: 'color-mix(in srgb, var(--action) 10%, var(--bg-card2))',
@@ -1227,12 +1253,21 @@ function EstoqueContent() {
               </div>
             )}
 
-            {/* Campos do formulário */}
-            {Object.keys(subEditData).map(key => (
-              <Field key={key} label={key}>
-                <input className="inp" value={subEditData[key] || ''} onChange={e => setSubEditData(p => ({ ...p, [key]: e.target.value }))} />
-              </Field>
-            ))}
+            {/* Campos do formulário em grid 2 colunas */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              {Object.keys(subEditData).map(key => {
+                // Campos longos ocupam 2 colunas
+                const wide = /nome|endereço|rua|logradouro|address|email|complemento/i.test(key)
+                return (
+                  <div key={key} style={{ gridColumn: wide ? 'span 2' : 'span 1' }}>
+                    <Field label={key}>
+                      <input className="inp" value={subEditData[key] || ''}
+                        onChange={e => setSubEditData(p => ({ ...p, [key]: e.target.value }))} />
+                    </Field>
+                  </div>
+                )
+              })}
+            </div>
 
             {/* Aviso de decremento */}
             {subEditRow?.status === 'Pendente' &&
@@ -1247,7 +1282,7 @@ function EstoqueContent() {
               </div>
             )}
           </div>
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 20 }}>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
             <Button variant="secondary" onClick={() => setSubEditRow(null)}>Cancelar</Button>
             <Button onClick={saveSubEdit} disabled={subIsSaving}>{subIsSaving ? 'Salvando…' : 'Salvar'}</Button>
           </div>

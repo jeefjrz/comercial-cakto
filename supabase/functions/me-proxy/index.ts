@@ -138,6 +138,46 @@ serve(async (req) => {
       })
     }
 
+    // ── 2b. Busca pedido por CPF (fallback sem me_cart_id) ───────────────────
+    if (action === 'find-order') {
+      const { cpf } = payload as { cpf: string }
+      const cleanCpf = String(cpf ?? '').replace(/\D/g, '')
+      if (!cleanCpf || cleanCpf.length !== 11) {
+        return new Response(JSON.stringify({ error: 'CPF inválido' }), {
+          status: 400, headers: { ...CORS, 'Content-Type': 'application/json' },
+        })
+      }
+
+      // Varre até 3 páginas × 100 = 300 pedidos
+      const pages = await Promise.all([1, 2, 3].map(page =>
+        meJson(`${ME_API}/orders?per_page=100&page=${page}&orderBy=created_at&sortedBy=desc`)
+      ))
+      const orders = pages.flatMap(p => p.data?.data ?? []) as Record<string, unknown>[]
+
+      const match = orders.find(o => {
+        const doc = String((o.to as Record<string, unknown>)?.document ?? '').replace(/\D/g, '')
+        return doc === cleanCpf
+      })
+
+      if (!match) {
+        return new Response(JSON.stringify({ found: false }), {
+          status: 200, headers: { ...CORS, 'Content-Type': 'application/json' },
+        })
+      }
+
+      const tracking = match.tracking
+        ? String(match.tracking)
+        : (match.melhorenvio_tracking ? String(match.melhorenvio_tracking) : '')
+      const meStatus = ME_STATUS_MAP[String(match.status ?? '')] ?? 'Em Trânsito'
+
+      return new Response(JSON.stringify({
+        found:      true,
+        me_cart_id: String(match.id ?? ''),
+        tracking,
+        status:     meStatus,
+      }), { status: 200, headers: { ...CORS, 'Content-Type': 'application/json' } })
+    }
+
     // ── 2. Rastreio individual ───────────────────────────────────────────────
     if (action === 'tracking') {
       const { id } = payload as { id: string }
