@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { ChevronLeft, ChevronRight, Plus, Phone, Calendar, CheckCircle, XCircle, Clock, Loader2, ExternalLink } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Phone, Calendar, CheckCircle, XCircle, Clock, Loader2, ExternalLink, Video, Trash2 } from 'lucide-react';
 import { useAuth } from '@/lib/authContext';
 import { Header } from '@/components/Header';
 import { Button } from '@/components/ui/Button';
@@ -25,16 +25,33 @@ const CALL_STATUS_COLORS: Record<string, string> = {
   'No-show':   'var(--orange)',
 };
 
+// Google Calendar colorId palette — mesma lógica na edge function
+const GCAL_COLORS: Record<number, string> = {
+  1: '#7986cb', 2: '#33b679', 3: '#8e24aa', 4: '#e67c73',  5: '#f6c026',
+  6: '#f5511d', 7: '#039be5', 8: '#3f51b5', 9: '#0b8043', 10: '#d50000', 11: '#f691b3',
+};
+function closerColorId(name: string): number {
+  let hash = 0;
+  for (const ch of name) hash = (hash * 31 + ch.charCodeAt(0)) & 0xffff;
+  return (hash % 11) + 1;
+}
+function closerColor(name: string): string {
+  return GCAL_COLORS[closerColorId(name)] ?? '#7986cb';
+}
+
 type DbUser  = { id: string; name: string; role: string }
 type CallItem = {
-  id:            string
-  title:         string
-  date:          string
-  time:          string
-  responsibleId: string
-  responsible:   string   // display name
-  status:        string
-  notes:         string
+  id:              string
+  title:           string
+  date:            string
+  time:            string
+  responsibleId:   string
+  responsible:     string
+  status:          string
+  notes:           string
+  clientEmail:     string
+  google_event_id: string
+  meet_link:       string
 }
 
 const EMPTY_FORM = { title: '', date: '', time: '', responsibleId: '', status: 'Agendada', notes: '', clientEmail: '' };
@@ -42,7 +59,7 @@ const EMPTY_FORM = { title: '', date: '', time: '', responsibleId: '', status: '
 export default function AgendaPage() {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
-  
+
   useEffect(() => { if (!loading && !user) navigate('/login'); }, [user, loading, navigate]);
   if (loading || !user) return null;
   return <AgendaContent />;
@@ -54,9 +71,10 @@ function AgendaContent() {
   const today = new Date();
   const [year, setYear]   = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
+  const [activeTab, setActiveTab] = useState('Todos');
 
-  const [calls, setCalls]     = useState<CallItem[]>([]);
-  const [users, setUsers]     = useState<DbUser[]>([]);
+  const [calls, setCalls]         = useState<CallItem[]>([]);
+  const [users, setUsers]         = useState<DbUser[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving]   = useState(false);
 
@@ -71,7 +89,9 @@ function AgendaContent() {
     async function load() {
       setIsLoading(true);
       const [{ data: dbCalls, error: ce }, { data: dbUsers, error: ue }] = await Promise.all([
-        supabase.from('calls').select('id,title,date,time,responsible,status,notes').order('date').order('time'),
+        supabase.from('calls')
+          .select('id,title,date,time,responsible,status,notes,client_email,google_event_id,meet_link')
+          .order('date').order('time'),
         supabase.from('users').select('id,name,role').order('name'),
       ]);
       if (ce) toast(ce.message, 'error');
@@ -80,17 +100,19 @@ function AgendaContent() {
       const userList = (dbUsers || []) as DbUser[];
       setUsers(userList);
       if (dbCalls) {
-        setCalls((dbCalls as { id: string; title: string; date: string; time: string; responsible: string; status: string; notes: string }[])
-          .map(c => ({
-            id:            c.id,
-            title:         c.title,
-            date:          c.date,
-            time:          (c.time as string)?.slice(0, 5) || '',
-            responsibleId: c.responsible,
-            responsible:   userList.find(u => u.id === c.responsible)?.name || '?',
-            status:        c.status,
-            notes:         c.notes,
-          })));
+        setCalls((dbCalls as any[]).map(c => ({
+          id:              c.id,
+          title:           c.title,
+          date:            c.date,
+          time:            (c.time as string)?.slice(0, 5) || '',
+          responsibleId:   c.responsible,
+          responsible:     userList.find(u => u.id === c.responsible)?.name || '?',
+          status:          c.status,
+          notes:           c.notes ?? '',
+          clientEmail:     c.client_email ?? '',
+          google_event_id: c.google_event_id ?? '',
+          meet_link:       c.meet_link ?? '',
+        })));
       }
       setIsLoading(false);
     }
@@ -98,7 +120,8 @@ function AgendaContent() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const closers = users.filter(u => u.role === 'Closer');
+  const closers       = users.filter(u => u.role === 'Closer');
+  const filteredCalls = activeTab === 'Todos' ? calls : calls.filter(c => c.responsible === activeTab);
 
   // ── Calendar helpers ───────────────────────────────────────────────────────
   const firstDay    = new Date(year, month, 1).getDay();
@@ -110,7 +133,7 @@ function AgendaContent() {
 
   function getCallsForDay(day: number) {
     const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    return calls.filter(c => c.date === dateStr);
+    return filteredCalls.filter(c => c.date === dateStr);
   }
 
   function openNew() {
@@ -121,7 +144,7 @@ function AgendaContent() {
 
   function openEdit(call: CallItem) {
     setEditCall(call);
-    setForm({ title: call.title, date: call.date, time: call.time, responsibleId: call.responsibleId, status: call.status, notes: call.notes });
+    setForm({ title: call.title, date: call.date, time: call.time, responsibleId: call.responsibleId, status: call.status, notes: call.notes, clientEmail: call.clientEmail || '' });
     setSheetCall(null);
     setModal(true);
   }
@@ -131,42 +154,97 @@ function AgendaContent() {
       toast('Preencha título, data e responsável.', 'error'); return;
     }
     setIsSaving(true);
+    const responsibleName = users.find(u => u.id === form.responsibleId)?.name || '?';
 
     if (editCall) {
-      const patch = { title: form.title, date: form.date, time: form.time || '00:00', responsible: form.responsibleId, status: form.status as CallStatus, notes: form.notes };
+      const patch = {
+        title:        form.title,
+        date:         form.date,
+        time:         form.time || '00:00',
+        responsible:  form.responsibleId,
+        status:       form.status as CallStatus,
+        notes:        form.notes,
+        client_email: form.clientEmail,
+      };
       const { error } = await supabase.from('calls').update(patch).eq('id', editCall.id);
       setIsSaving(false);
       if (error) { toast(error.message, 'error'); return; }
-      const responsibleName = users.find(u => u.id === form.responsibleId)?.name || '?';
-      setCalls(p => p.map(c => c.id === editCall.id ? { ...c, ...patch, responsibleId: form.responsibleId, responsible: responsibleName, time: form.time } : c));
+      setCalls(p => p.map(c => c.id === editCall.id
+        ? { ...c, ...patch, responsibleId: form.responsibleId, responsible: responsibleName, time: form.time, clientEmail: form.clientEmail }
+        : c));
+      setModal(false);
       toast('Call atualizada!', 'success');
+
+      if (editCall.google_event_id) {
+        supabase.functions.invoke('schedule-call', {
+          body: {
+            action: 'update', google_event_id: editCall.google_event_id,
+            title: form.title, date: form.date, time: form.time || '09:00',
+            closerName: responsibleName, closerEmail: user?.email || '',
+            clientEmail: form.clientEmail || '', notes: form.notes,
+          },
+        }).then(({ error: fnErr }) => {
+          if (fnErr) toast('Google Calendar: falha ao atualizar', 'error');
+          else toast('Google Calendar atualizado ✓', 'success');
+        });
+      }
     } else {
-      const row = { title: form.title, date: form.date, time: form.time || '00:00', responsible: form.responsibleId, status: form.status as CallStatus, notes: form.notes };
+      const row = {
+        title:        form.title,
+        date:         form.date,
+        time:         form.time || '00:00',
+        responsible:  form.responsibleId,
+        status:       form.status as CallStatus,
+        notes:        form.notes,
+        client_email: form.clientEmail,
+      };
       const { data, error } = await supabase.from('calls').insert(row).select().single();
       setIsSaving(false);
       if (error) { toast(error.message, 'error'); return; }
-      const responsibleName = users.find(u => u.id === form.responsibleId)?.name || '?';
-      const newCall: CallItem = { id: (data as { id: string }).id, title: form.title, date: form.date, time: form.time, responsibleId: form.responsibleId, responsible: responsibleName, status: form.status, notes: form.notes };
+      const newCall: CallItem = {
+        id: (data as any).id, title: form.title, date: form.date, time: form.time,
+        responsibleId: form.responsibleId, responsible: responsibleName,
+        status: form.status, notes: form.notes, clientEmail: form.clientEmail,
+        google_event_id: '', meet_link: '',
+      };
       setCalls(p => [newCall, ...p]);
+      setModal(false);
       toast('Call agendada!', 'success');
 
-      // Sincroniza com o Google Calendar via OAuth Refresh Token
       supabase.functions.invoke('schedule-call', {
         body: {
-          title:       form.title,
-          date:        form.date,
-          time:        form.time || '09:00',
-          closerName:  responsibleName,
-          closerEmail: user?.email || '',
-          clientEmail: form.clientEmail || '',
-          notes:       form.notes,
+          action: 'create',
+          title: form.title, date: form.date, time: form.time || '09:00',
+          closerName: responsibleName, closerEmail: user?.email || '',
+          clientEmail: form.clientEmail || '', notes: form.notes,
         },
-      }).then(({ error: fnErr }) => {
-        if (fnErr) toast('Call salva, mas falhou no Google Calendar', 'error');
-        else toast('Sincronizado com Google Calendar ✓', 'success');
+      }).then(async ({ data: fnData, error: fnErr }) => {
+        if (fnErr) { toast('Call salva, mas falhou no Google Calendar', 'error'); return; }
+        const { eventId, meetLink } = (fnData || {}) as { eventId?: string; meetLink?: string };
+        if (eventId) {
+          await supabase.from('calls').update({ google_event_id: eventId, meet_link: meetLink ?? '' }).eq('id', newCall.id);
+          setCalls(p => p.map(c => c.id === newCall.id ? { ...c, google_event_id: eventId, meet_link: meetLink ?? '' } : c));
+        }
+        toast('Sincronizado com Google Calendar ✓', 'success');
       });
     }
-    setModal(false);
+  }
+
+  async function deleteCall(call: CallItem) {
+    if (!window.confirm('Apagar esta call permanentemente?')) return;
+    const { error } = await supabase.from('calls').delete().eq('id', call.id);
+    if (error) { toast(error.message, 'error'); return; }
+    setCalls(p => p.filter(c => c.id !== call.id));
+    setSheetCall(null);
+    toast('Call apagada.', 'success');
+    if (call.google_event_id) {
+      supabase.functions.invoke('schedule-call', {
+        body: { action: 'delete', google_event_id: call.google_event_id },
+      }).then(({ error: fnErr }) => {
+        if (fnErr) toast('Removido localmente, falhou no Google Calendar', 'error');
+        else toast('Removido do Google Calendar ✓', 'success');
+      });
+    }
   }
 
   async function updateStatus(id: string, status: string) {
@@ -177,7 +255,10 @@ function AgendaContent() {
     toast(`Status: ${status}`, 'success');
   }
 
-  const upcoming = calls.filter(c => c.status === 'Agendada').sort((a, b) => a.date.localeCompare(b.date)).slice(0, 8);
+  const upcoming = filteredCalls
+    .filter(c => c.status === 'Agendada')
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(0, 8);
 
   const closerStats = closers.map(u => {
     const uCalls = calls.filter(c => c.responsibleId === u.id);
@@ -189,8 +270,7 @@ function AgendaContent() {
     return (
       <>
         <Header />
-        <div className="page-wrap" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center',
-          minHeight: 300, gap: 10, color: 'var(--text2)' }}>
+        <div className="page-wrap" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 300, gap: 10, color: 'var(--text2)' }}>
           <Loader2 size={20} style={{ animation: 'spin 1s linear infinite' }} />
           <span style={{ fontSize: 14 }}>Carregando agenda…</span>
         </div>
@@ -208,7 +288,7 @@ function AgendaContent() {
           <Button icon={Plus} onClick={openNew}>Nova Call</Button>
         </div>
 
-        {/* ── Dashboard KPIs ──────────────────────────────────────────────── */}
+        {/* ── KPIs ───────────────────────────────────────────────────────────── */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(155px, 1fr))', gap: 12, marginBottom: 20 }}>
           {([
             { label: 'Agendadas',  value: calls.filter(c => c.status === 'Agendada').length,  color: 'var(--action)' },
@@ -223,8 +303,24 @@ function AgendaContent() {
           ))}
         </div>
 
+        {/* ── Tabs por Closer ─────────────────────────────────────────────────── */}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+          {(['Todos', ...closers.map(c => c.name)] as string[]).map(tab => {
+            const isActive = activeTab === tab;
+            const bg = isActive ? (tab === 'Todos' ? 'var(--action)' : closerColor(tab)) : 'var(--bg-card)';
+            return (
+              <button key={tab} onClick={() => setActiveTab(tab)} style={{
+                padding: '6px 18px', borderRadius: 20,
+                border: `1px solid ${isActive ? 'transparent' : 'var(--border)'}`,
+                background: bg, color: isActive ? '#fff' : 'var(--text)',
+                fontWeight: 600, fontSize: 13, cursor: 'pointer', transition: 'all .15s',
+              }}>{tab === 'Todos' ? 'Todos' : tab.split(' ')[0]}</button>
+            );
+          })}
+        </div>
+
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 20 }}>
-          {/* Calendar */}
+          {/* Calendário */}
           <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 24 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
               <button onClick={prevMonth} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text2)', padding: 4 }}><ChevronLeft size={20} /></button>
@@ -246,15 +342,17 @@ function AgendaContent() {
                     border: isToday ? '1px solid var(--action)' : '1px solid transparent',
                   }}>
                     <div style={{ fontSize: 12, fontWeight: isToday ? 800 : 500, color: isToday ? 'var(--action)' : 'var(--text)', marginBottom: 2 }}>{day}</div>
-                    {dayCalls.slice(0, 2).map(c => (
-                      <div key={c.id} onClick={() => setSheetCall(c)} style={{
-                        fontSize: 10, borderRadius: 4, padding: '2px 4px', marginBottom: 2,
-                        cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                        background: `color-mix(in srgb, ${CALL_STATUS_COLORS[c.status] || 'var(--action)'} 20%, transparent)`,
-                        border: `1px solid ${CALL_STATUS_COLORS[c.status] || 'var(--action)'}`,
-                        color: CALL_STATUS_COLORS[c.status] || 'var(--action)',
-                      }}>{c.time} {c.title}</div>
-                    ))}
+                    {dayCalls.slice(0, 2).map(c => {
+                      const cc = closerColor(c.responsible);
+                      return (
+                        <div key={c.id} onClick={() => setSheetCall(c)} style={{
+                          fontSize: 10, borderRadius: 4, padding: '2px 4px', marginBottom: 2,
+                          cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                          background: `color-mix(in srgb, ${cc} 20%, transparent)`,
+                          border: `1px solid ${cc}`, color: cc,
+                        }}>{c.time} {c.title}</div>
+                      );
+                    })}
                     {dayCalls.length > 2 && <div style={{ fontSize: 9, color: 'var(--text2)' }}>+{dayCalls.length - 2}</div>}
                   </div>
                 );
@@ -268,13 +366,16 @@ function AgendaContent() {
               <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 14 }}>Próximas Calls</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {upcoming.length === 0 && <div style={{ fontSize: 13, color: 'var(--text2)' }}>Nenhuma call agendada</div>}
-                {upcoming.map(c => (
-                  <div key={c.id} onClick={() => setSheetCall(c)} style={{ padding: 12, background: 'var(--bg-card2)', borderRadius: 10, cursor: 'pointer', borderLeft: '3px solid var(--action)' }}>
-                    <div style={{ fontWeight: 600, fontSize: 13 }}>{c.title}</div>
-                    <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 2 }}>{c.date} às {c.time}</div>
-                    <div style={{ fontSize: 11, color: 'var(--text2)' }}>{c.responsible}</div>
-                  </div>
-                ))}
+                {upcoming.map(c => {
+                  const cc = closerColor(c.responsible);
+                  return (
+                    <div key={c.id} onClick={() => setSheetCall(c)} style={{ padding: 12, background: 'var(--bg-card2)', borderRadius: 10, cursor: 'pointer', borderLeft: `3px solid ${cc}` }}>
+                      <div style={{ fontWeight: 600, fontSize: 13 }}>{c.title}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 2 }}>{c.date} às {c.time}</div>
+                      <div style={{ fontSize: 11, color: cc, fontWeight: 600 }}>{c.responsible}</div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
@@ -284,8 +385,8 @@ function AgendaContent() {
                 <div style={{ fontWeight: 700, fontSize: 14 }}>Google Calendar</div>
               </div>
               <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 12, lineHeight: 1.5 }}>
-                Calendário Mestre ativo via Service Account.<br />
-                Todos os closers sincronizam automaticamente ao agendar.
+                OAuth Refresh Token ativo.<br />
+                Google Meet gerado automaticamente ao agendar.
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--green)', fontWeight: 600 }}>
                 <ExternalLink size={13} />
@@ -295,38 +396,41 @@ function AgendaContent() {
           </div>
         </div>
 
-        {/* ── Performance por Closer (cards clicáveis) ────────────────────── */}
+        {/* ── Performance por Closer ───────────────────────────────────────────── */}
         {closerStats.length > 0 && (
           <div style={{ marginTop: 20, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 24 }}>
             <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 16 }}>Performance por Closer</div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
-              {closerStats.map(c => (
-                <div key={c.name} onClick={() => setCloserModal({ id: c.id, name: c.name })}
-                  style={{ background: 'var(--bg-card2)', borderRadius: 12, padding: 16, cursor: 'pointer',
-                    border: '1px solid transparent', transition: 'border .15s' }}
-                  onMouseEnter={e => (e.currentTarget.style.border = '1px solid var(--action)')}
-                  onMouseLeave={e => (e.currentTarget.style.border = '1px solid transparent')}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                    <Avatar name={c.name} size={34} />
-                    <div>
-                      <div style={{ fontWeight: 600, fontSize: 13 }}>{c.name.split(' ')[0]}</div>
-                      <div style={{ fontSize: 11, color: 'var(--text2)' }}>{c.total} call{c.total !== 1 ? 's' : ''}</div>
+              {closerStats.map(c => {
+                const cc = closerColor(c.name);
+                return (
+                  <div key={c.name} onClick={() => setCloserModal({ id: c.id, name: c.name })}
+                    style={{ background: 'var(--bg-card2)', borderRadius: 12, padding: 16, cursor: 'pointer',
+                      border: '1px solid transparent', transition: 'border .15s' }}
+                    onMouseEnter={e => (e.currentTarget.style.border = `1px solid ${cc}`)}
+                    onMouseLeave={e => (e.currentTarget.style.border = '1px solid transparent')}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                      <Avatar name={c.name} size={34} />
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: 13 }}>{c.name.split(' ')[0]}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text2)' }}>{c.total} call{c.total !== 1 ? 's' : ''}</div>
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--text2)', marginBottom: 6 }}>
+                      <span>{c.done}/{c.total} realizadas</span>
+                      <span style={{ fontWeight: 700, color: c.rate >= 70 ? 'var(--green)' : c.rate >= 40 ? 'var(--orange)' : 'var(--red)' }}>{c.rate}%</span>
+                    </div>
+                    <div className="progress-bar">
+                      <div className="progress-fill" style={{ width: `${c.rate}%`, background: c.rate >= 70 ? 'var(--green)' : c.rate >= 40 ? 'var(--orange)' : 'var(--red)' }} />
                     </div>
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--text2)', marginBottom: 6 }}>
-                    <span>{c.done}/{c.total} realizadas</span>
-                    <span style={{ fontWeight: 700, color: c.rate >= 70 ? 'var(--green)' : c.rate >= 40 ? 'var(--orange)' : 'var(--red)' }}>{c.rate}%</span>
-                  </div>
-                  <div className="progress-bar">
-                    <div className="progress-fill" style={{ width: `${c.rate}%`, background: c.rate >= 70 ? 'var(--green)' : c.rate >= 40 ? 'var(--orange)' : 'var(--red)' }} />
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
 
-        {/* Modal */}
+        {/* ── Modal: Nova / Editar Call ──────────────────────────────────────── */}
         <Modal open={modal} onClose={() => setModal(false)} title={editCall ? 'Editar Call' : 'Nova Call'}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <Field label="Título">
@@ -358,23 +462,26 @@ function AgendaContent() {
             </Field>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
               <Button variant="secondary" onClick={() => setModal(false)}>Cancelar</Button>
-              <Button onClick={saveCall} disabled={isSaving}>{editCall ? (isSaving ? 'Salvando…' : 'Salvar') : (isSaving ? 'Agendando…' : 'Agendar')}</Button>
+              <Button onClick={saveCall} disabled={isSaving}>
+                {editCall ? (isSaving ? 'Salvando…' : 'Salvar') : (isSaving ? 'Agendando…' : 'Agendar')}
+              </Button>
             </div>
           </div>
         </Modal>
 
-        {/* ── Modal: Calls do Closer ──────────────────────────────────────────── */}
+        {/* ── Modal: Calls do Closer ─────────────────────────────────────────── */}
         <Modal open={closerModal !== null} onClose={() => setCloserModal(null)}
           title={`Calls — ${closerModal?.name ?? ''}`}>
           <div style={{ maxHeight: '65vh', overflowY: 'auto' }}>
             {(() => {
-              const closerCalls = calls.filter(c => c.responsibleId === closerModal?.id)
-                .sort((a, b) => b.date.localeCompare(a.date))
+              const closerCalls = calls
+                .filter(c => c.responsibleId === closerModal?.id)
+                .sort((a, b) => b.date.localeCompare(a.date));
               if (closerCalls.length === 0) return (
                 <div style={{ textAlign: 'center', color: 'var(--text2)', padding: 32, fontSize: 13 }}>
                   Nenhuma call registrada.
                 </div>
-              )
+              );
               return (
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                   <thead>
@@ -388,8 +495,9 @@ function AgendaContent() {
                   </thead>
                   <tbody>
                     {closerCalls.map((c, i) => (
-                      <tr key={c.id} style={{ background: i % 2 === 0 ? 'var(--bg-card)' : 'var(--bg-card2)', cursor: 'pointer' }}
-                        onClick={() => { setCloserModal(null); setSheetCall(c) }}>
+                      <tr key={c.id}
+                        style={{ background: i % 2 === 0 ? 'var(--bg-card)' : 'var(--bg-card2)', cursor: 'pointer' }}
+                        onClick={() => { setCloserModal(null); setSheetCall(c); }}>
                         <td style={{ padding: '9px 12px', whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)' }}>
                           {new Date(c.date).toLocaleDateString('pt-BR')}
                         </td>
@@ -400,23 +508,23 @@ function AgendaContent() {
                           {c.title}
                         </td>
                         <td style={{ padding: '9px 12px', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' }}>
-                          <span style={{ background: `color-mix(in srgb, ${CALL_STATUS_COLORS[c.status] || 'var(--text2)'} 15%, var(--bg-card2))`,
+                          <span style={{
+                            background: `color-mix(in srgb, ${CALL_STATUS_COLORS[c.status] || 'var(--text2)'} 15%, var(--bg-card2))`,
                             color: CALL_STATUS_COLORS[c.status] || 'var(--text2)',
                             border: `1px solid ${CALL_STATUS_COLORS[c.status] || 'var(--border)'}`,
-                            borderRadius: 20, padding: '2px 9px', fontSize: 11, fontWeight: 700 }}>
-                            {c.status}
-                          </span>
+                            borderRadius: 20, padding: '2px 9px', fontSize: 11, fontWeight: 700,
+                          }}>{c.status}</span>
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
-              )
+              );
             })()}
           </div>
         </Modal>
 
-        {/* Sheet */}
+        {/* ── Sheet: Detalhe da Call ─────────────────────────────────────────── */}
         <Sheet open={!!sheetCall} onClose={() => setSheetCall(null)} title="Detalhe da Call">
           {sheetCall && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -424,6 +532,17 @@ function AgendaContent() {
                 <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 8 }}>{sheetCall.title}</div>
                 <Badge label={sheetCall.status} color={CALL_STATUS_COLORS[sheetCall.status] || 'var(--text2)'} />
               </div>
+
+              {/* Link do Meet */}
+              {sheetCall.meet_link && (
+                <a href={sheetCall.meet_link} target="_blank" rel="noreferrer"
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                    background: '#1a73e8', color: '#fff', borderRadius: 10, padding: '12px 16px',
+                    fontWeight: 700, fontSize: 14, textDecoration: 'none' }}>
+                  <Video size={16} /> Entrar no Google Meet
+                </a>
+              )}
+
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                 <div style={{ background: 'var(--bg-card2)', borderRadius: 10, padding: 14 }}>
                   <div style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.06em' }}>Data</div>
@@ -434,19 +553,22 @@ function AgendaContent() {
                   <div style={{ fontWeight: 700, marginTop: 4 }}>{sheetCall.time}</div>
                 </div>
               </div>
+
               <div style={{ background: 'var(--bg-card2)', borderRadius: 10, padding: 14 }}>
                 <div style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>Responsável</div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <Avatar name={sheetCall.responsible} size={32} />
-                  <span style={{ fontWeight: 600 }}>{sheetCall.responsible}</span>
+                  <span style={{ fontWeight: 600, color: closerColor(sheetCall.responsible) }}>{sheetCall.responsible}</span>
                 </div>
               </div>
+
               {sheetCall.notes && (
                 <div style={{ background: 'var(--bg-card2)', borderRadius: 10, padding: 14 }}>
                   <div style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>Observações</div>
                   <div style={{ fontSize: 13 }}>{sheetCall.notes}</div>
                 </div>
               )}
+
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.06em' }}>Alterar Status</div>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -455,7 +577,11 @@ function AgendaContent() {
                   <Button size="sm" variant="warning"     icon={Clock}       onClick={() => updateStatus(sheetCall.id, 'No-show')}>No-show</Button>
                 </div>
               </div>
-              <Button variant="secondary" icon={Phone} onClick={() => openEdit(sheetCall)}>Editar Call</Button>
+
+              <div style={{ display: 'flex', gap: 8 }}>
+                <div style={{ flex: 1 }}><Button variant="secondary" icon={Phone} onClick={() => openEdit(sheetCall)}>Editar</Button></div>
+                <div style={{ flex: 1 }}><Button variant="destructive" icon={Trash2} onClick={() => deleteCall(sheetCall)}>Apagar</Button></div>
+              </div>
             </div>
           )}
         </Sheet>
