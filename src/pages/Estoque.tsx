@@ -485,39 +485,20 @@ function EstoqueContent() {
   }
 
   async function syncTracking(row: Submission) {
-    // Fallback: sem me_cart_id → busca pedido por CPF nos últimos 100 envios do ME
-    if (!row.me_cart_id) {
-      const cpf = Object.values(row.data).map(v => String(v).replace(/\D/g, '')).find(v => v.length === 11) ?? ''
-      if (!cpf) { toast('CPF não encontrado nos dados do cliente.', 'error'); return }
-      setSyncingId(row.id)
-      const { data: fnData, error: fnErr } = await supabase.functions.invoke('me-proxy', {
-        body: { action: 'find-order', payload: { cpf } },
-      })
-      setSyncingId(null)
-      if (fnErr || fnData?.error) {
-        toast('Não foi possível localizar o pedido no Melhor Envio.', 'error')
-        return
-      }
-      if (!fnData?.found) { toast('Nenhum pedido encontrado para este CPF no ME.', 'info'); return }
-
-      const { me_cart_id, tracking, status: meStatus } = fnData as { me_cart_id: string; tracking: string; status: string }
-      const patch: Record<string, string> = { me_cart_id, status: meStatus }
-      if (tracking) patch.tracking_code = tracking
-      const { error: dbErr } = await supabase.from('form_submissions').update(patch).eq('id', row.id)
-      if (dbErr) { toast(dbErr.message, 'error'); return }
-      setSubmissions(p => p.map(s => s.id === row.id ? { ...s, ...patch } : s))
-      if (tracking) {
-        toast(`Pedido localizado! Rastreio: ${tracking}`, 'success')
-        void triggerWhatsAppWebhook(row, tracking)
-      } else {
-        toast('Pedido localizado no ME mas etiqueta ainda não gerada.', 'info')
-      }
-      return
+    // Extrai CPF/CNPJ dos dados do cliente (campo com chave cpf/cnpj/documento, ou valor com 11/14 dígitos)
+    const extractDoc = (): string => {
+      // Prioriza campo com nome sugestivo
+      const byKey = Object.entries(row.data).find(([k]) => /cpf|cnpj|documento|document/i.test(k))
+      if (byKey) return String(byKey[1]).replace(/\D/g, '')
+      // Fallback: primeiro valor que tenha 11 dígitos (CPF)
+      return Object.values(row.data).map(v => String(v).replace(/\D/g, '')).find(v => v.length === 11) ?? ''
     }
-    setSyncingId(row.id)
+    const document = extractDoc()
+    console.log('[syncTracking] doc extraído:', document, '| me_cart_id:', row.me_cart_id)
 
+    setSyncingId(row.id)
     const { data: fnData, error: fnErr } = await supabase.functions.invoke('me-proxy', {
-      body: { action: 'tracking', payload: { id: row.me_cart_id } },
+      body: { action: 'sync-tracking', payload: { me_cart_id: row.me_cart_id || '', document } },
     })
     setSyncingId(null)
 
@@ -526,22 +507,33 @@ function EstoqueContent() {
       toast(fnErr.message || 'Erro ao chamar Edge Function', 'error')
       return
     }
-
-    // Detecta que o pedido foi apagado/expirou no ME (objeto vazio ou chave ausente)
-    const orderEntry = fnData?.[row.me_cart_id]
-    if (fnData?.error || (!orderEntry && fnData && Object.keys(fnData).length > 0)) {
-      console.warn('[syncTracking] pedido não encontrado no ME — resetando carrinho:', fnData)
+    if (fnData?.error) {
+      console.error('[syncTracking] error:', fnData.error)
+      toast(fnData.error, 'error')
+      return
+    }
+    if (fnData?.reset) {
       await supabase.from('form_submissions').update({ me_cart_id: '', status: 'Pendente' }).eq('id', row.id)
       setSubmissions(p => p.map(s => s.id === row.id ? { ...s, me_cart_id: '', status: 'Pendente' } : s))
-      toast('Item não encontrado no ME. O carrinho foi resetado para você tentar gerar novamente.', 'info')
+      toast('Item não encontrado no ME. Carrinho resetado — tente gerar novamente.', 'info')
+      return
+    }
+    if (!fnData?.found) {
+      toast('Nenhum pedido encontrado no Melhor Envio para este cliente.', 'info')
       return
     }
 
-    // ME retorna objeto com chave = me_cart_id → { tracking: "..." }
-    const code: string = orderEntry?.tracking ?? ''
-    console.log('[syncTracking] resposta ME:', fnData, '→ code:', code)
+    const { me_cart_id: foundCartId, tracking, status: meStatus } = fnData as { me_cart_id: string; tracking: string; status: string }
+    const patch: Record<string, string> = { status: meStatus }
+    if (foundCartId) patch.me_cart_id = foundCartId
+    if (tracking) patch.tracking_code = tracking
 
-    if (!code) { toast('Etiqueta ainda não gerada/paga no Melhor Envio.', 'info'); return }
+    const { error: dbErr } = await supabase.from('form_submissions').update(patch).eq('id', row.id)
+    if (dbErr) { toast(dbErr.message, 'error'); return }
+    setSubmissions(p => p.map(s => s.id === row.id ? { ...s, ...patch } : s))
+
+    const code = tracking
+    if (!code) { toast('Pedido localizado, etiqueta ainda não gerada/paga no ME.', 'info'); return }
 
     // Só persiste APÓS código real recebido
     const { error: dbErr } = await supabase.from('form_submissions')
@@ -549,11 +541,7 @@ function EstoqueContent() {
       .eq('id', row.id)
     if (dbErr) { toast(dbErr.message, 'error'); return }
 
-    setSubmissions(p => p.map(s => s.id === row.id
-      ? { ...s, tracking_code: code, status: 'Em Trânsito' }
-      : s))
     toast(`Rastreio sincronizado: ${code}`, 'success')
-
     // Dispara webhook WhatsApp automaticamente (individual apenas)
     void triggerWhatsAppWebhook(row, code)
   }

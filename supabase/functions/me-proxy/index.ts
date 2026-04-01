@@ -138,28 +138,57 @@ serve(async (req) => {
       })
     }
 
-    // ── 2b. Busca pedido por CPF (fallback sem me_cart_id) ───────────────────
-    if (action === 'find-order') {
-      const { cpf } = payload as { cpf: string }
-      const cleanCpf = String(cpf ?? '').replace(/\D/g, '')
-      if (!cleanCpf || cleanCpf.length !== 11) {
-        return new Response(JSON.stringify({ error: 'CPF inválido' }), {
-          status: 400, headers: { ...CORS, 'Content-Type': 'application/json' },
+    // ── 2. Sincronização individual (por me_cart_id com fallback por CPF) ─────
+    if (action === 'sync-tracking') {
+      const { me_cart_id, document } = payload as { me_cart_id?: string; document?: string }
+      const sanitizeDoc = (v: unknown): string => v ? String(v).replace(/\D/g, '') : ''
+      const cleanDoc = sanitizeDoc(document)
+
+      // Caminho A: temos me_cart_id — tenta via /shipment/tracking
+      if (me_cart_id) {
+        const { status: tStatus, data: tData } = await meJson(`${ME_API}/shipment/tracking`, {
+          method: 'POST',
+          body:   JSON.stringify({ orders: [me_cart_id] }),
+        })
+        console.log(`[sync-tracking] /shipment/tracking HTTP ${tStatus}:`, JSON.stringify(tData)?.slice(0, 200))
+
+        if (tStatus === 200 && tData && typeof tData === 'object') {
+          const entry = (tData as Record<string, unknown>)[me_cart_id] as Record<string, unknown> | undefined
+          if (entry) {
+            const tracking = entry.tracking ? String(entry.tracking) : ''
+            const meStatus = ME_STATUS_MAP[String(entry.status ?? '')] ?? 'Em Trânsito'
+            return new Response(JSON.stringify({ found: true, me_cart_id, tracking, status: meStatus }), {
+              status: 200, headers: { ...CORS, 'Content-Type': 'application/json' },
+            })
+          }
+          // Chave ausente → pedido foi apagado do ME
+          console.warn('[sync-tracking] me_cart_id não encontrado na resposta — reset')
+          return new Response(JSON.stringify({ found: false, reset: true }), {
+            status: 200, headers: { ...CORS, 'Content-Type': 'application/json' },
+          })
+        }
+      }
+
+      // Caminho B: sem me_cart_id ou tracking falhou → busca por documento nos últimos 300 pedidos
+      if (!cleanDoc) {
+        return new Response(JSON.stringify({ found: false, error: 'Documento não informado e me_cart_id ausente' }), {
+          status: 200, headers: { ...CORS, 'Content-Type': 'application/json' },
         })
       }
 
-      // Varre até 3 páginas × 100 = 300 pedidos
+      console.log(`[sync-tracking] fallback por documento: ${cleanDoc}`)
       const pages = await Promise.all([1, 2, 3].map(page =>
         meJson(`${ME_API}/orders?per_page=100&page=${page}&orderBy=created_at&sortedBy=desc`)
       ))
       const orders = pages.flatMap(p => p.data?.data ?? []) as Record<string, unknown>[]
+      console.log(`[sync-tracking] total orders varredura: ${orders.length}`)
 
-      const match = orders.find(o => {
-        const doc = String((o.to as Record<string, unknown>)?.document ?? '').replace(/\D/g, '')
-        return doc === cleanCpf
-      })
+      const match = orders.find(o =>
+        sanitizeDoc((o.to as Record<string, unknown>)?.document) === cleanDoc
+      )
 
       if (!match) {
+        console.log('[sync-tracking] nenhum match por documento')
         return new Response(JSON.stringify({ found: false }), {
           status: 200, headers: { ...CORS, 'Content-Type': 'application/json' },
         })
@@ -169,6 +198,7 @@ serve(async (req) => {
         ? String(match.tracking)
         : (match.melhorenvio_tracking ? String(match.melhorenvio_tracking) : '')
       const meStatus = ME_STATUS_MAP[String(match.status ?? '')] ?? 'Em Trânsito'
+      console.log(`[sync-tracking] MATCH doc=${cleanDoc} id=${match.id} track=${tracking || '(vazio)'}`)
 
       return new Response(JSON.stringify({
         found:      true,
@@ -176,19 +206,6 @@ serve(async (req) => {
         tracking,
         status:     meStatus,
       }), { status: 200, headers: { ...CORS, 'Content-Type': 'application/json' } })
-    }
-
-    // ── 2. Rastreio individual ───────────────────────────────────────────────
-    if (action === 'tracking') {
-      const { id } = payload as { id: string }
-      const { status, data } = await meJson(`${ME_API}/shipment/tracking`, {
-        method: 'POST',
-        body:   JSON.stringify({ orders: [id] }),
-      })
-      if (status >= 400) console.error(`[tracking] ME ${status}:`, JSON.stringify(data))
-      return new Response(JSON.stringify(data), {
-        status, headers: { ...CORS, 'Content-Type': 'application/json' },
-      })
     }
 
     // ── 3. Sincronização retroativa em massa ─────────────────────────────────
