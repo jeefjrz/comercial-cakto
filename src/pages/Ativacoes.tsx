@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, Search, Eye, Edit, Trash2, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react'
+import { Plus, Search, Eye, Edit, Trash2, ChevronLeft, ChevronRight, Loader2, Download } from 'lucide-react'
 import { useAuth } from '@/lib/authContext'
 import { useToast } from '@/components/ui/Toast'
 import { Header } from '@/components/Header'
@@ -158,6 +158,36 @@ function AtivacoesContent({ isAdmin }: { isAdmin: boolean }) {
   })
   const totalPages = Math.ceil(filtered.length / PER_PAGE)
   const paginated = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE)
+
+  function exportToCSV() {
+    const esc = (v: string | null | undefined) => {
+      const s = (v ?? '').replace(/"/g, '""')
+      return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s}"` : s
+    }
+    const getTeamName = (userId: string) => {
+      const tid = users.find(u => u.id === userId)?.team_id ?? null
+      return tid ? (teams.find(t => t.id === tid)?.name ?? '—') : '—'
+    }
+    const headers = ['Nome do Cliente', 'E-mail', 'Telefone', 'Data de Ativação', 'Hora', 'Canal de Origem', 'Responsável', 'Time']
+    const rows = filtered.map(a => [
+      esc(a.client),
+      esc(a.email),
+      esc(a.phone),
+      esc(formatDate(a.date)),
+      esc(a.time),
+      esc(a.channel),
+      esc(getUserName(a.responsible)),
+      esc(getTeamName(a.responsible)),
+    ].join(','))
+    const csv = '\uFEFF' + headers.join(',') + '\n' + rows.join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url  = URL.createObjectURL(blob)
+    const a    = document.createElement('a')
+    a.href = url
+    a.download = `ativacoes_${filtered[0]?.date ?? 'relatorio'}_a_${filtered[filtered.length - 1]?.date ?? ''}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
   const medalColors = ['var(--gold)', '#C0C0C0', '#CD7F32']
 
   // ── Actions ───────────────────────────────────────────────────────────────
@@ -372,8 +402,8 @@ function AtivacoesContent({ isAdmin }: { isAdmin: boolean }) {
           })()}
         </div>
 
-        {/* ── Filters ── */}
-        <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+        {/* ── Filters + Export ── */}
+        <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
           <div style={{ position: 'relative', flex: 1, minWidth: 180 }}>
             <input className="inp" placeholder="Buscar cliente..." value={search}
               onChange={e => { setSearch(e.target.value); setPage(1) }} style={{ paddingLeft: 36 }} />
@@ -396,6 +426,11 @@ function AtivacoesContent({ isAdmin }: { isAdmin: boolean }) {
           <div style={{ width: 180 }}>
             <Sel value={filterUser} onChange={v => { setFilterUser(v); setPage(1) }}
               options={users.map(u => ({ value: u.id, label: u.name }))} placeholder="Responsável" />
+          </div>
+          <div style={{ marginLeft: 'auto' }}>
+            <Button variant="secondary" icon={Download} onClick={exportToCSV} disabled={filtered.length === 0}>
+              Exportar
+            </Button>
           </div>
         </div>
 
