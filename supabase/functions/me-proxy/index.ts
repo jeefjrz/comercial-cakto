@@ -100,9 +100,10 @@ serve(async (req) => {
           body:   JSON.stringify(calcPayload),
         })
         if (calcStatus === 200 && Array.isArray(calcData)) {
-          // Remove opções com erro e ordena estritamente pelo menor preço
+          // Apenas Correios (id=1) e Jadlog (id=2), sem erro, ordenados pelo menor preço
           const eligible = (calcData as Record<string, unknown>[])
-            .filter(s => !s.error && s.price != null)
+            .filter(s => !s.error && s.price != null &&
+              ((s.company as Record<string, unknown>)?.id === 1 || (s.company as Record<string, unknown>)?.id === 2))
             .sort((a, b) => parseFloat(String(a.price)) - parseFloat(String(b.price)))
           if (eligible.length > 0) {
             const cheapest = eligible[0]
