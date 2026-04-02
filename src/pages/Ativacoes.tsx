@@ -20,7 +20,8 @@ type DbActivation = {
   id: string; client: string; email: string | null; phone: string | null
   channel: string; responsible: string; date: string; time: string | null
 }
-type DbUser = { id: string; name: string; role: string }
+type DbUser  = { id: string; name: string; role: string; team_id: string | null }
+type DbTeam  = { id: string; name: string }
 
 const CHANNELS: ActivationChannel[] = ['Inbound', 'Outbound', 'Indicação']
 const EMPTY_FORM = { client: '', email: '', channel: 'Inbound', responsible: '', date: '', phone: '+55 ' }
@@ -54,6 +55,7 @@ function AtivacoesContent({ isAdmin }: { isAdmin: boolean }) {
   const toast = useToast()
   const [activations, setActivations] = useState<DbActivation[]>([])
   const [users, setUsers] = useState<DbUser[]>([])
+  const [teams, setTeams] = useState<DbTeam[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [dateRange, setDateRange] = useState<DateRange>(DEFAULT_RANGE)
@@ -61,6 +63,7 @@ function AtivacoesContent({ isAdmin }: { isAdmin: boolean }) {
   const [search, setSearch] = useState('')
   const [filterChannel, setFilterChannel] = useState('')
   const [filterUser, setFilterUser] = useState('')
+  const [filterTeam, setFilterTeam] = useState('all')
   const [page, setPage] = useState(1)
 
   const [kpis, setKpis] = useState({ today: 0, yesterday: 0, week: 0, weekPrev: 0, month: 0, monthPrev: 0, total: 0 })
@@ -104,7 +107,7 @@ function AtivacoesContent({ isAdmin }: { isAdmin: boolean }) {
     if (!dateRange.startDate || !dateRange.endDate) return
     async function load() {
       setIsLoading(true)
-      const [{ data: acts, error: ae }, { data: usrs, error: ue }] = await Promise.all([
+      const [{ data: acts, error: ae }, { data: usrs, error: ue }, { data: tms }] = await Promise.all([
         supabase
           .from('activations')
           .select('id,client,email,phone,channel,responsible,date,time')
@@ -112,12 +115,14 @@ function AtivacoesContent({ isAdmin }: { isAdmin: boolean }) {
           .lte('date', dateRange.endDate)
           .order('date', { ascending: false })
           .order('time', { ascending: false }),
-        supabase.from('users').select('id,name,role').order('name'),
+        supabase.from('users').select('id,name,role,team_id').order('name'),
+        supabase.from('teams').select('id,name').order('name'),
       ])
       if (ae) toast(ae.message, 'error')
       if (ue) toast(ue.message, 'error')
       if (acts) setActivations(acts as DbActivation[])
       if (usrs) setUsers(usrs as DbUser[])
+      if (tms) setTeams(tms as DbTeam[])
       setIsLoading(false)
     }
     load()
@@ -148,7 +153,8 @@ function AtivacoesContent({ isAdmin }: { isAdmin: boolean }) {
     const matchS = a.client.toLowerCase().includes(q) || (a.email || '').toLowerCase().includes(q)
     const matchC = !filterChannel || a.channel === filterChannel
     const matchU = !filterUser || a.responsible === filterUser
-    return matchS && matchC && matchU
+    const matchT = filterTeam === 'all' || users.find(u => u.id === a.responsible)?.team_id === filterTeam
+    return matchS && matchC && matchU && matchT
   })
   const totalPages = Math.ceil(filtered.length / PER_PAGE)
   const paginated = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE)
@@ -379,6 +385,14 @@ function AtivacoesContent({ isAdmin }: { isAdmin: boolean }) {
             <Sel value={filterChannel} onChange={v => { setFilterChannel(v); setPage(1) }}
               options={CHANNELS} placeholder="Canal" />
           </div>
+          {teams.length > 0 && (
+            <div style={{ width: 170 }}>
+              <Sel value={filterTeam === 'all' ? '' : filterTeam}
+                onChange={v => { setFilterTeam(v || 'all'); setPage(1) }}
+                options={teams.map(t => ({ value: t.id, label: t.name }))}
+                placeholder="Todos os Times" />
+            </div>
+          )}
           <div style={{ width: 180 }}>
             <Sel value={filterUser} onChange={v => { setFilterUser(v); setPage(1) }}
               options={users.map(u => ({ value: u.id, label: u.name }))} placeholder="Responsável" />
