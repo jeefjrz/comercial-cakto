@@ -100,19 +100,14 @@ serve(async (req) => {
           body:   JSON.stringify(calcPayload),
         })
         if (calcStatus === 200 && Array.isArray(calcData)) {
-          // Filtra Correios (company.id=1) e Jadlog (company.id=2), sem erros
-          const eligible = calcData.filter((s: Record<string, unknown>) =>
-            !s.error &&
-            typeof s.price === 'number' &&
-            (s.company as Record<string, unknown>)?.id === 1 ||
-            (!s.error && typeof s.price === 'number' && (s.company as Record<string, unknown>)?.id === 2)
-          )
+          // Remove opções com erro e ordena estritamente pelo menor preço
+          const eligible = (calcData as Record<string, unknown>[])
+            .filter(s => !s.error && s.price != null)
+            .sort((a, b) => parseFloat(String(a.price)) - parseFloat(String(b.price)))
           if (eligible.length > 0) {
-            const cheapest = eligible.reduce((a: Record<string, unknown>, b: Record<string, unknown>) =>
-              (a.price as number) <= (b.price as number) ? a : b
-            )
+            const cheapest = eligible[0]
             serviceId = cheapest.id as number
-            console.log(`[cart] serviço escolhido: id=${serviceId} price=${cheapest.price} company=${(cheapest.company as Record<string, unknown>)?.name}`)
+            console.log(`[cart] serviço mais barato: id=${serviceId} price=${cheapest.price} company=${(cheapest.company as Record<string, unknown>)?.name}`)
           } else {
             console.warn('[cart] nenhum serviço elegível — usando fallback PAC (id=1)')
           }
