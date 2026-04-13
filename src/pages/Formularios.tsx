@@ -3,7 +3,6 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { Plus, ChevronLeft, Pencil, Trash2, Eye, Copy, GripVertical, Settings, Link, Loader2, Globe, Image, Search, Send } from 'lucide-react';
-import { ContratoForm } from './FormularioContrato';
 import { useAuth } from '@/lib/authContext';
 import { Header } from '@/components/Header';
 import { PillTabs } from '@/components/ui/PillTabs';
@@ -97,7 +96,7 @@ function FormulariosContent() {
   }, []);
 
   function openEditor(form?: DbForm) {
-    setSelectedForm(form || { ...EMPTY_FORM });
+    setSelectedForm(form || { ...EMPTY_FORM, type: pageTab as FormType });
     setView('editor');
   }
 
@@ -196,42 +195,44 @@ function FormulariosContent() {
 
         <PillTabs tabs={PAGE_TABS} active={pageTab} onChange={setPageTab} style={{ marginBottom: 24 }} />
 
-        {/* ── Aba Contrato ── */}
-        {pageTab === 'Contrato' && <ContratoForm />}
-
-        {/* ── Aba Premiação ── */}
-        {pageTab === 'Premiação' && <>
-        {forms.length === 0 && (
-          <div style={{ textAlign: 'center', color: 'var(--text2)', padding: '48px 0' }}>
-            Nenhum formulário criado ainda.
-          </div>
-        )}
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
-          {forms.map(f => (
-            <div key={f.id} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 16, padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div style={{ fontWeight: 700, fontSize: 15 }}>{f.name}</div>
-                <Badge label={f.status} color={f.status === 'Publicado' ? 'var(--green)' : f.status === 'Rascunho' ? 'var(--orange)' : 'var(--text2)'} />
+        {(() => {
+          const displayForms = pageTab === 'Contrato'
+            ? forms.filter(f => f.type === 'Contrato')
+            : forms.filter(f => f.type !== 'Contrato')
+          return (
+            <>
+              {displayForms.length === 0 && (
+                <div style={{ textAlign: 'center', color: 'var(--text2)', padding: '48px 0' }}>
+                  Nenhum formulário criado ainda.
+                </div>
+              )}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
+                {displayForms.map(f => (
+                  <div key={f.id} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 16, padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <div style={{ fontWeight: 700, fontSize: 15 }}>{f.name}</div>
+                      <Badge label={f.status} color={f.status === 'Publicado' ? 'var(--green)' : f.status === 'Rascunho' ? 'var(--orange)' : 'var(--text2)'} />
+                    </div>
+                    <div style={{ display: 'flex', gap: 16, fontSize: 13, color: 'var(--text2)' }}>
+                      <span>{Array.isArray(f.fields) ? (f.fields as unknown[]).length : 0} campos</span>
+                      <span>{f.responses} respostas</span>
+                      {f.custom_domain && <span style={{ color: 'var(--action)' }}>🌐 {f.custom_domain}</span>}
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      <Button size="sm" icon={Pencil} onClick={() => openEditor(f)}>Editar</Button>
+                      <Button size="sm" variant="secondary" icon={Eye} onClick={() => openResponses(f)}>Respostas</Button>
+                      <Button size="sm" variant="ghost" icon={Copy} onClick={() => {
+                        navigator.clipboard.writeText(`<iframe src="${window.location.origin}/f/${f.id}" width="100%" height="600" />`);
+                        toast('Embed copiado!', 'success');
+                      }}>Embed</Button>
+                      <Button size="sm" variant="destructive" icon={Trash2} onClick={() => setDeleteModal(f.id)} />
+                    </div>
+                  </div>
+                ))}
               </div>
-              <div style={{ display: 'flex', gap: 16, fontSize: 13, color: 'var(--text2)' }}>
-                <span>{Array.isArray(f.fields) ? (f.fields as unknown[]).length : 0} campos</span>
-                <span>{f.responses} respostas</span>
-                {f.custom_domain && <span style={{ color: 'var(--action)' }}>🌐 {f.custom_domain}</span>}
-              </div>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <Button size="sm" icon={Pencil} onClick={() => openEditor(f)}>Editar</Button>
-                <Button size="sm" variant="secondary" icon={Eye} onClick={() => openResponses(f)}>Respostas</Button>
-                <Button size="sm" variant="ghost" icon={Copy} onClick={() => {
-                  navigator.clipboard.writeText(`<iframe src="${window.location.origin}/f/${f.id}" width="100%" height="600" />`);
-                  toast('Embed copiado!', 'success');
-                }}>Embed</Button>
-                <Button size="sm" variant="destructive" icon={Trash2} onClick={() => setDeleteModal(f.id)} />
-              </div>
-            </div>
-          ))}
-        </div>
-        </>}
+            </>
+          )
+        })()}
 
         <Modal open={deleteModal !== null} onClose={() => setDeleteModal(null)} title="Excluir Formulário">
           <div style={{ fontSize: 14, color: 'var(--text2)', marginBottom: 20 }}>

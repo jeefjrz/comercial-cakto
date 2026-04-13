@@ -268,10 +268,11 @@ export default function PublicForm({ customDomain }: Props) {
       })()
     }
 
-    // Fire webhook (non-blocking)
+    // Fire webhook (non-blocking). mode: no-cors suporta Google Apps Script e outros endpoints sem CORS header.
     if (form.webhook) {
       fetch(form.webhook, {
         method: 'POST',
+        mode: 'no-cors',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ form_id: form.id, form_name: form.name, data: labeledData, submitted_at: new Date().toISOString() }),
       }).catch(() => {})

@@ -15,7 +15,7 @@ export type UserRole =
   | 'SDR'
 
 export type ActivationChannel = 'Inbound' | 'Outbound' | 'Indicação'
-export type FormType           = 'Cadastro' | 'Pesquisa' | 'Indicação' | 'Qualificação'
+export type FormType           = 'Cadastro' | 'Pesquisa' | 'Indicação' | 'Qualificação' | 'Premiação' | 'Contrato'
 export type FormStatus         = 'Publicado' | 'Arquivado' | 'Rascunho'
 export type PaymentStatus      = 'Pendente' | 'Pago' | 'Cancelado'
 export type CallStatus         = 'Agendada' | 'Realizada' | 'Cancelada' | 'No-show'
