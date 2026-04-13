@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { Plus, ChevronLeft, Pencil, Trash2, Eye, Copy, GripVertical, Settings, Link, Loader2, Globe, Image, Search, Send } from 'lucide-react';
+import { ContratoForm } from './FormularioContrato';
 import { useAuth } from '@/lib/authContext';
 import { Header } from '@/components/Header';
 import { PillTabs } from '@/components/ui/PillTabs';
@@ -70,9 +71,12 @@ export default function FormulariosPage() {
   return <FormulariosContent />;
 }
 
+const PAGE_TABS = ['Premiação', 'Contrato'];
+
 function FormulariosContent() {
   const { user } = useAuth();
   const toast = useToast();
+  const [pageTab, setPageTab] = useState('Premiação');
   const [view, setView] = useState<SubView>('list');
   const [forms, setForms] = useState<DbForm[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -183,11 +187,20 @@ function FormulariosContent() {
     <>
       <Header />
       <div className="page-wrap">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
           <h1 style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-.02em' }}>Formulários</h1>
-          <Button icon={Plus} onClick={() => openEditor()}>Novo Formulário</Button>
+          {pageTab === 'Premiação' && (
+            <Button icon={Plus} onClick={() => openEditor()}>Novo Formulário</Button>
+          )}
         </div>
 
+        <PillTabs tabs={PAGE_TABS} active={pageTab} onChange={setPageTab} style={{ marginBottom: 24 }} />
+
+        {/* ── Aba Contrato ── */}
+        {pageTab === 'Contrato' && <ContratoForm />}
+
+        {/* ── Aba Premiação ── */}
+        {pageTab === 'Premiação' && <>
         {forms.length === 0 && (
           <div style={{ textAlign: 'center', color: 'var(--text2)', padding: '48px 0' }}>
             Nenhum formulário criado ainda.
@@ -218,6 +231,7 @@ function FormulariosContent() {
             </div>
           ))}
         </div>
+        </>}
 
         <Modal open={deleteModal !== null} onClose={() => setDeleteModal(null)} title="Excluir Formulário">
           <div style={{ fontSize: 14, color: 'var(--text2)', marginBottom: 20 }}>
