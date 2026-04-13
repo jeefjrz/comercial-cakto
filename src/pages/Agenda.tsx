@@ -89,6 +89,10 @@ function AgendaContent() {
   const [year, setYear]   = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
   const [activeTab, setActiveTab] = useState('Todos');
+  const [viewMode, setViewMode]   = useState<'month' | 'week' | 'day'>('month');
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+  const [selectedDate, setSelectedDate] = useState(todayStr);
+  const [nowTime, setNowTime] = useState(() => new Date());
 
   const [calls, setCalls]         = useState<CallItem[]>([]);
   const [users, setUsers]         = useState<DbUser[]>([]);
@@ -149,9 +153,64 @@ function AgendaContent() {
   function prevMonth() { if (month === 0) { setMonth(11); setYear(y => y - 1); } else setMonth(m => m - 1); }
   function nextMonth() { if (month === 11) { setMonth(0); setYear(y => y + 1); } else setMonth(m => m + 1); }
 
+  // atualiza o indicador de hora atual a cada minuto
+  useEffect(() => {
+    const t = setInterval(() => setNowTime(new Date()), 60_000);
+    return () => clearInterval(t);
+  }, []);
+
   function getCallsForDay(day: number) {
     const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     return filteredCalls.filter(c => c.date === dateStr);
+  }
+  function getCallsForDate(dateStr: string) {
+    return filteredCalls.filter(c => c.date === dateStr).sort((a, b) => a.time.localeCompare(b.time));
+  }
+  function dateAdd(dateStr: string, days: number): string {
+    const d = new Date(dateStr + 'T12:00:00');
+    d.setDate(d.getDate() + days);
+    return d.toISOString().slice(0, 10);
+  }
+  function getWeekDates(dateStr: string): string[] {
+    const d   = new Date(dateStr + 'T12:00:00');
+    const dow = d.getDay();
+    const mon = new Date(d);
+    mon.setDate(d.getDate() - ((dow + 6) % 7));
+    return Array.from({ length: 7 }, (_, i) => {
+      const x = new Date(mon); x.setDate(mon.getDate() + i); return x.toISOString().slice(0, 10);
+    });
+  }
+  function timeToMin(t: string): number {
+    if (!t) return 0;
+    const [h, m] = t.split(':').map(Number);
+    return (h || 0) * 60 + (m || 0);
+  }
+
+  const weekDates  = getWeekDates(selectedDate);
+  const selDateObj = new Date(selectedDate + 'T12:00:00');
+  const navLabel   = viewMode === 'month'
+    ? `${MONTHS[month]} ${year}`
+    : viewMode === 'week'
+    ? (() => {
+        const s = new Date(weekDates[0]+'T12:00:00'), e = new Date(weekDates[6]+'T12:00:00');
+        return `${s.getDate()}–${e.getDate()} ${MONTHS_PT[e.getMonth()]} ${e.getFullYear()}`;
+      })()
+    : `${DAYS_FULL[selDateObj.getDay()]}, ${selDateObj.getDate()} de ${MONTHS_PT[selDateObj.getMonth()]}`;
+
+  function prevNav() {
+    if (viewMode === 'month') prevMonth();
+    else if (viewMode === 'week') setSelectedDate(d => dateAdd(d, -7));
+    else setSelectedDate(d => dateAdd(d, -1));
+  }
+  function nextNav() {
+    if (viewMode === 'month') nextMonth();
+    else if (viewMode === 'week') setSelectedDate(d => dateAdd(d, 7));
+    else setSelectedDate(d => dateAdd(d, 1));
+  }
+  function goToday() {
+    setSelectedDate(todayStr);
+    setYear(today.getFullYear());
+    setMonth(today.getMonth());
   }
 
   function openNew() {
@@ -340,44 +399,182 @@ function AgendaContent() {
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 20 }}>
-          {/* Calendário */}
+          {/* Calendário Multi-Visão */}
           <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 24 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-              <button onClick={prevMonth} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text2)', padding: 4 }}><ChevronLeft size={20} /></button>
-              <div style={{ fontWeight: 700, fontSize: 16 }}>{MONTHS[month]} {year}</div>
-              <button onClick={nextMonth} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text2)', padding: 4 }}><ChevronRight size={20} /></button>
+
+            {/* ── Toolbar: nav + view switcher ─────────────────────────── */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <button onClick={prevNav} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text2)', padding: 4, borderRadius: 6 }}><ChevronLeft size={18} /></button>
+                <div style={{ fontWeight: 700, fontSize: 15, minWidth: 200, textAlign: 'center' }}>{navLabel}</div>
+                <button onClick={nextNav} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text2)', padding: 4, borderRadius: 6 }}><ChevronRight size={18} /></button>
+                <button onClick={goToday} style={{ fontSize: 12, fontWeight: 600, padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-card2)', color: 'var(--text2)', cursor: 'pointer', marginLeft: 4, fontFamily: 'inherit' }}>Hoje</button>
+              </div>
+              <div style={{ display: 'flex', gap: 2, background: 'var(--bg-card2)', borderRadius: 8, padding: 3 }}>
+                {(['month','week','day'] as const).map(v => (
+                  <button key={v} onClick={() => setViewMode(v)} style={{
+                    padding: '5px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+                    background: viewMode === v ? 'var(--action)' : 'transparent',
+                    color: viewMode === v ? '#fff' : 'var(--text2)',
+                    fontWeight: 600, fontSize: 12, transition: 'all .15s',
+                  }}>{v === 'month' ? 'Mês' : v === 'week' ? 'Semana' : 'Dia'}</button>
+                ))}
+              </div>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4 }}>
-              {DAYS.map(d => (
-                <div key={d} style={{ textAlign: 'center', fontSize: 11, fontWeight: 700, color: 'var(--text2)', padding: '4px 0', textTransform: 'uppercase', letterSpacing: '.04em' }}>{d}</div>
-              ))}
-              {cells.map((day, i) => {
-                if (!day) return <div key={`e${i}`} />;
-                const dayCalls = getCallsForDay(day);
-                const isToday  = day === today.getDate() && month === today.getMonth() && year === today.getFullYear();
-                return (
-                  <div key={day} style={{
-                    minHeight: 60, padding: 4, borderRadius: 8,
-                    background: isToday ? 'color-mix(in srgb, var(--action) 12%, transparent)' : 'transparent',
-                    border: isToday ? '1px solid var(--action)' : '1px solid transparent',
-                  }}>
-                    <div style={{ fontSize: 12, fontWeight: isToday ? 800 : 500, color: isToday ? 'var(--action)' : 'var(--text)', marginBottom: 2 }}>{day}</div>
-                    {dayCalls.slice(0, 2).map(c => {
-                      const cc = closerColor(c.responsible);
+
+            {/* ── Month View ───────────────────────────────────────────── */}
+            {viewMode === 'month' && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4 }}>
+                {DAYS.map(d => (
+                  <div key={d} style={{ textAlign: 'center', fontSize: 11, fontWeight: 700, color: 'var(--text2)', padding: '4px 0', textTransform: 'uppercase', letterSpacing: '.04em' }}>{d}</div>
+                ))}
+                {cells.map((day, i) => {
+                  if (!day) return <div key={`e${i}`} />;
+                  const dayCalls = getCallsForDay(day);
+                  const isToday  = day === today.getDate() && month === today.getMonth() && year === today.getFullYear();
+                  const dStr     = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+                  return (
+                    <div key={day} onClick={() => { setSelectedDate(dStr); setViewMode('day'); }}
+                      style={{ minHeight: 60, padding: 4, borderRadius: 8, cursor: 'pointer',
+                        background: isToday ? 'color-mix(in srgb, var(--action) 12%, transparent)' : 'transparent',
+                        border: isToday ? '1px solid var(--action)' : '1px solid transparent',
+                      }}>
+                      <div style={{ fontSize: 12, fontWeight: isToday ? 800 : 500, color: isToday ? 'var(--action)' : 'var(--text)', marginBottom: 2 }}>{day}</div>
+                      {dayCalls.slice(0, 2).map(c => {
+                        const cc = closerColor(c.responsible);
+                        return (
+                          <div key={c.id} onClick={e => { e.stopPropagation(); setSheetCall(c); }} style={{
+                            fontSize: 10, borderRadius: 4, padding: '2px 4px', marginBottom: 2,
+                            cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                            background: `color-mix(in srgb, ${cc} 20%, transparent)`,
+                            border: `1px solid ${cc}`, color: cc,
+                          }}>{c.time} {c.title}</div>
+                        );
+                      })}
+                      {dayCalls.length > 2 && <div style={{ fontSize: 9, color: 'var(--text2)' }}>+{dayCalls.length - 2}</div>}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* ── Week View ────────────────────────────────────────────── */}
+            {viewMode === 'week' && (() => {
+              const WD_SHORT = ['Seg','Ter','Qua','Qui','Sex','Sáb','Dom'];
+              return (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6 }}>
+                  {weekDates.map((dStr, i) => {
+                    const dObj     = new Date(dStr + 'T12:00:00');
+                    const isToday  = dStr === todayStr;
+                    const dayCalls = getCallsForDate(dStr);
+                    return (
+                      <div key={dStr}>
+                        <div onClick={() => { setSelectedDate(dStr); setViewMode('day'); }}
+                          style={{ textAlign: 'center', padding: '6px 4px', borderRadius: 8, marginBottom: 6, cursor: 'pointer',
+                            background: isToday ? 'color-mix(in srgb, var(--action) 15%, transparent)' : 'transparent',
+                            border: isToday ? '1px solid var(--action)' : '1px solid var(--border)',
+                          }}>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: isToday ? 'var(--action)' : 'var(--text2)', textTransform: 'uppercase', letterSpacing: '.04em' }}>{WD_SHORT[i]}</div>
+                          <div style={{ fontSize: 20, fontWeight: 800, color: isToday ? 'var(--action)' : 'var(--text)', lineHeight: 1.2, marginTop: 2 }}>{dObj.getDate()}</div>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minHeight: 80 }}>
+                          {dayCalls.map(c => {
+                            const cc = closerColor(c.responsible);
+                            return (
+                              <div key={c.id} onClick={() => setSheetCall(c)} style={{
+                                borderRadius: 6, padding: '4px 6px', cursor: 'pointer',
+                                background: `color-mix(in srgb, ${cc} 18%, transparent)`,
+                                border: `1px solid ${cc}`,
+                              }}>
+                                <div style={{ fontSize: 10, color: cc, fontWeight: 700 }}>{c.time}</div>
+                                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text)', lineHeight: 1.3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.title}</div>
+                                {c.meet_link && <Video size={9} color={cc} />}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+
+            {/* ── Day View ─────────────────────────────────────────────── */}
+            {viewMode === 'day' && (() => {
+              const DAY_START_H = 8;
+              const DAY_END_H   = 21;
+              const HOUR_PX     = 64;
+              const TOTAL_PX    = (DAY_END_H - DAY_START_H) * HOUR_PX;
+              const DAY_START_M = DAY_START_H * 60;
+              const TOTAL_M     = (DAY_END_H - DAY_START_H) * 60;
+              const HOURS       = Array.from({ length: DAY_END_H - DAY_START_H + 1 }, (_, i) => DAY_START_H + i);
+              const dayCalls    = getCallsForDate(selectedDate);
+              const nowMin      = nowTime.getHours() * 60 + nowTime.getMinutes();
+              const showNow     = selectedDate === todayStr && nowMin >= DAY_START_M && nowMin <= DAY_END_H * 60;
+              const nowPx       = ((nowMin - DAY_START_M) / TOTAL_M) * TOTAL_PX;
+              return (
+                <div style={{ display: 'flex', overflowY: 'auto', maxHeight: 600 }}>
+                  {/* Eixo de horas */}
+                  <div style={{ width: 52, flexShrink: 0, paddingTop: 0 }}>
+                    {HOURS.map(h => (
+                      <div key={h} style={{ height: HOUR_PX, display: 'flex', alignItems: 'flex-start', paddingTop: 2, justifyContent: 'flex-end', paddingRight: 10 }}>
+                        <span style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 500, whiteSpace: 'nowrap' }}>{String(h).padStart(2,'0')}:00</span>
+                      </div>
+                    ))}
+                  </div>
+                  {/* Grid de eventos */}
+                  <div style={{ flex: 1, position: 'relative', height: TOTAL_PX }}>
+                    {HOURS.map(h => (
+                      <div key={h} style={{ position: 'absolute', top: (h - DAY_START_H) * HOUR_PX, left: 0, right: 0,
+                        borderTop: `1px solid var(--border)`, pointerEvents: 'none' }} />
+                    ))}
+                    {/* Indicador de hora atual */}
+                    {showNow && (
+                      <div style={{ position: 'absolute', top: nowPx, left: 0, right: 0, zIndex: 10, pointerEvents: 'none', display: 'flex', alignItems: 'center' }}>
+                        <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--red)', flexShrink: 0, marginLeft: -4 }} />
+                        <div style={{ flex: 1, height: 2, background: 'var(--red)' }} />
+                      </div>
+                    )}
+                    {/* Eventos */}
+                    {dayCalls.map(c => {
+                      const startM = timeToMin(c.time);
+                      const endM   = c.endTime ? timeToMin(c.endTime) : startM + 60;
+                      if (startM < DAY_START_M || startM > DAY_END_H * 60) return null;
+                      const top    = Math.max(0, ((startM - DAY_START_M) / TOTAL_M) * TOTAL_PX);
+                      const height = Math.max(44, ((endM - startM) / TOTAL_M) * TOTAL_PX);
+                      const cc     = closerColor(c.responsible);
                       return (
-                        <div key={c.id} onClick={() => setSheetCall(c)} style={{
-                          fontSize: 10, borderRadius: 4, padding: '2px 4px', marginBottom: 2,
-                          cursor: 'pointer', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                          background: `color-mix(in srgb, ${cc} 20%, transparent)`,
-                          border: `1px solid ${cc}`, color: cc,
-                        }}>{c.time} {c.title}</div>
+                        <div key={c.id} onClick={() => setSheetCall(c)}
+                          style={{ position: 'absolute', top, left: 4, right: 4, height,
+                            borderRadius: 8, padding: '6px 10px', cursor: 'pointer', overflow: 'hidden',
+                            background: `color-mix(in srgb, ${cc} 20%, var(--bg-card))`,
+                            border: `1.5px solid ${cc}`,
+                          }}>
+                          <div style={{ fontSize: 11, color: cc, fontWeight: 700, marginBottom: 2 }}>
+                            {c.time}{c.endTime ? ` – ${c.endTime}` : ''}
+                          </div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.title}</div>
+                          <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.responsible}</div>
+                          {c.meet_link && (
+                            <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                              <Video size={11} color="#1a73e8" />
+                              <span style={{ fontSize: 10, color: '#1a73e8', fontWeight: 600 }}>Meet</span>
+                            </div>
+                          )}
+                        </div>
                       );
                     })}
-                    {dayCalls.length > 2 && <div style={{ fontSize: 9, color: 'var(--text2)' }}>+{dayCalls.length - 2}</div>}
+                    {dayCalls.length === 0 && (
+                      <div style={{ position: 'absolute', top: '50%', left: 0, right: 0, transform: 'translateY(-50%)',
+                        textAlign: 'center', color: 'var(--text2)', fontSize: 13, pointerEvents: 'none' }}>
+                        Nenhuma call neste dia
+                      </div>
+                    )}
                   </div>
-                );
-              })}
-            </div>
+                </div>
+              );
+            })()}
           </div>
 
           {/* Sidebar */}
