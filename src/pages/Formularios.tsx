@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { Plus, ChevronLeft, Pencil, Trash2, Eye, Copy, GripVertical, Settings, Link, Loader2, Globe, Image, Search, Send } from 'lucide-react';
+import { Plus, ChevronLeft, Pencil, Trash2, Eye, Copy, GripVertical, Settings, Link, Loader2, Globe, Image, Search, Send, Gift, FileText } from 'lucide-react';
 import { useAuth } from '@/lib/authContext';
 import { Header } from '@/components/Header';
 import { PillTabs } from '@/components/ui/PillTabs';
@@ -82,6 +82,7 @@ function FormulariosContent() {
   const [isSaving, setIsSaving] = useState(false);
   const [selectedForm, setSelectedForm] = useState<DbForm | null>(null);
   const [deleteModal, setDeleteModal] = useState<string | null>(null);
+  const [typeModal, setTypeModal] = useState(false);
 
   useEffect(() => {
     supabase.from('forms')
@@ -95,8 +96,8 @@ function FormulariosContent() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function openEditor(form?: DbForm) {
-    setSelectedForm(form || { ...EMPTY_FORM, type: pageTab as FormType });
+  function openEditor(form?: DbForm, type?: FormType) {
+    setSelectedForm(form || { ...EMPTY_FORM, type: type ?? pageTab as FormType });
     setView('editor');
   }
 
@@ -188,9 +189,7 @@ function FormulariosContent() {
       <div className="page-wrap">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
           <h1 style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-.02em' }}>Formulários</h1>
-          {pageTab === 'Premiação' && (
-            <Button icon={Plus} onClick={() => openEditor()}>Novo Formulário</Button>
-          )}
+          <Button icon={Plus} onClick={() => setTypeModal(true)}>Novo Formulário</Button>
         </div>
 
         <PillTabs tabs={PAGE_TABS} active={pageTab} onChange={setPageTab} style={{ marginBottom: 24 }} />
@@ -233,6 +232,70 @@ function FormulariosContent() {
             </>
           )
         })()}
+
+        {/* ── Modal: Escolher tipo de formulário ── */}
+        {typeModal && (
+          <div
+            onClick={() => setTypeModal(false)}
+            style={{
+              position: 'fixed', inset: 0, zIndex: 200,
+              background: 'rgba(0,0,0,.72)', backdropFilter: 'blur(6px)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          >
+            <div
+              onClick={e => e.stopPropagation()}
+              style={{
+                background: 'linear-gradient(145deg,#111113,#18181c)',
+                border: '1px solid rgba(255,255,255,.1)',
+                borderRadius: 20, padding: '36px 32px', width: '100%', maxWidth: 480,
+                boxShadow: '0 32px 80px rgba(0,0,0,.6)',
+              }}
+            >
+              <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--text)', marginBottom: 6, letterSpacing: '-.02em' }}>
+                Qual tipo de formulário?
+              </div>
+              <div style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 28 }}>
+                Escolha a categoria para o novo formulário
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                {([
+                  { type: 'Premiação' as FormType, icon: Gift,     title: 'Premiação', desc: 'Formulário para resgate de prêmios' },
+                  { type: 'Contrato'  as FormType, icon: FileText, title: 'Contrato',  desc: 'Formulário para propostas e contratos' },
+                ] as { type: FormType; icon: React.ComponentType<{ size?: number; color?: string }>; title: string; desc: string }[]).map(opt => (
+                  <button
+                    key={opt.type}
+                    onClick={() => { setTypeModal(false); openEditor(undefined, opt.type); }}
+                    style={{
+                      display: 'flex', flexDirection: 'column', alignItems: 'flex-start',
+                      gap: 10, padding: '20px 18px', borderRadius: 14, border: '1px solid rgba(255,255,255,.1)',
+                      background: 'rgba(255,255,255,.04)', cursor: 'pointer', fontFamily: 'inherit',
+                      textAlign: 'left', transition: 'all .15s',
+                    }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,.08)'; (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,255,255,.2)'; }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,.04)'; (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,255,255,.1)'; }}
+                  >
+                    <div style={{ width: 40, height: 40, borderRadius: 10, background: 'rgba(41,151,255,.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <opt.icon size={20} color="#2997FF" />
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>{opt.title}</div>
+                      <div style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.4 }}>{opt.desc}</div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+
+              <button
+                onClick={() => setTypeModal(false)}
+                style={{ marginTop: 20, width: '100%', padding: '10px 0', borderRadius: 10, border: '1px solid rgba(255,255,255,.08)', background: 'transparent', color: 'var(--text2)', fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        )}
 
         <Modal open={deleteModal !== null} onClose={() => setDeleteModal(null)} title="Excluir Formulário">
           <div style={{ fontSize: 14, color: 'var(--text2)', marginBottom: 20 }}>
