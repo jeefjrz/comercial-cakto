@@ -9,6 +9,7 @@ import Formularios from './pages/Formularios'
 import Estoque from './pages/Estoque'
 import Agenda from './pages/Agenda'
 import Dashboards from './pages/Dashboards'
+import FormularioContrato from './pages/FormularioContrato'
 import PublicForm from './pages/PublicForm'
 
 const MAIN_DOMAINS = [
@@ -61,6 +62,7 @@ export default function App() {
       <Route path="/estoque" element={<ProtectedRoute><Estoque /></ProtectedRoute>} />
       <Route path="/agenda" element={<ProtectedRoute><Agenda /></ProtectedRoute>} />
       <Route path="/dashboards" element={<ProtectedRoute><Dashboards /></ProtectedRoute>} />
+      <Route path="/contrato" element={<ProtectedRoute><FormularioContrato /></ProtectedRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )

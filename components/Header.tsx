@@ -14,6 +14,7 @@ const NAV_ITEMS = [
   { key: 'estoque',      label: 'Estoque' },
   { key: 'agenda',       label: 'Agenda' },
   { key: 'dashboards',   label: 'Dashboards' },
+  { key: 'contrato',     label: 'Contratos' },
 ];
 
 export function Header() {
