@@ -506,11 +506,16 @@ function EstoqueContent() {
       return Object.values(row.data).map(v => String(v).replace(/\D/g, '')).find(v => v.length === 11) ?? ''
     }
     const document = extractDoc()
-    console.log('[syncTracking] doc extraído:', document, '| me_cart_id:', row.me_cart_id)
+
+    // Extrai hint de dimensão dos dados da submission (ex: "250K", "100k") para desempate no ME
+    const DIMENSION_KEYS = ['100k', '250k', '500k', '1m', '2m', '5m', '10m']
+    const allDataText = Object.values(row.data).map(v => String(v).toLowerCase()).join(' ')
+    const product_hint = DIMENSION_KEYS.find(k => allDataText.includes(k)) ?? ''
+    console.log('[syncTracking] doc extraído:', document, '| me_cart_id:', row.me_cart_id, '| product_hint:', product_hint)
 
     setSyncingId(row.id)
     const { data: fnData, error: fnErr } = await supabase.functions.invoke('me-proxy', {
-      body: { action: 'sync-tracking', payload: { me_cart_id: row.me_cart_id || '', document } },
+      body: { action: 'sync-tracking', payload: { me_cart_id: row.me_cart_id || '', document, product_hint } },
     })
     setSyncingId(null)
 

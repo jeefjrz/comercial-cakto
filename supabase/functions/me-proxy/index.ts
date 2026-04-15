@@ -136,10 +136,11 @@ serve(async (req) => {
 
     // ── 2. Sincronização individual (por me_cart_id com fallback por CPF) ─────
     if (action === 'sync-tracking') {
-      const { me_cart_id, document } = payload as { me_cart_id?: string; document?: string }
+      const { me_cart_id, document, product_hint } = payload as { me_cart_id?: string; document?: string; product_hint?: string }
       const sanitizeDoc = (v: unknown): string => v ? String(v).replace(/\D/g, '') : ''
-      const cleanCartId = (me_cart_id ?? '').trim()
-      const cleanDoc    = sanitizeDoc(document)
+      const cleanCartId   = (me_cart_id    ?? '').trim()
+      const cleanDoc      = sanitizeDoc(document)
+      const cleanHint     = (product_hint  ?? '').toLowerCase().trim()
 
       console.log(`[sync-tracking] recebido me_cart_id="${cleanCartId}" document="${cleanDoc}"`)
 
@@ -199,13 +200,38 @@ serve(async (req) => {
       const orders = pages.flatMap(p => p.data?.data ?? []) as Record<string, unknown>[]
       console.log(`[sync-tracking] varredura com filtro de status: ${orders.length} pedidos`)
 
-      const match = orders.find(o =>
+      const cpfOrders = orders.filter(o =>
         sanitizeDoc((o.to as Record<string, unknown>)?.document) === cleanDoc
       )
 
-      if (!match) {
+      let match: Record<string, unknown> | undefined
+
+      if (cpfOrders.length === 0) {
         console.log(`[sync-tracking] nenhum match para doc=${cleanDoc}`)
-        // Se tinha me_cart_id mas não achou por CPF também → reseta
+        return new Response(JSON.stringify({ found: false, reset: !!cleanCartId }), {
+          status: 200, headers: { ...CORS, 'Content-Type': 'application/json' },
+        })
+      } else if (cpfOrders.length === 1 || !cleanHint) {
+        // Um único pedido ou sem hint de dimensão → pega o primeiro (mais recente)
+        match = cpfOrders[0]
+      } else {
+        // Múltiplos pedidos com mesmo CPF — usa product_hint para desempate
+        const DIMENSION_KEYS = ['100k', '250k', '500k', '1m', '2m', '5m', '10m']
+        const scored = cpfOrders.map(o => {
+          const prodNames = Array.isArray(o.products)
+            ? (o.products as Record<string, unknown>[]).map(p => String(p.name ?? '').toLowerCase()).join(' ')
+            : ''
+          const meDim = DIMENSION_KEYS.find(k => prodNames.includes(k)) ?? ''
+          return { o, score: (meDim && meDim === cleanHint) ? 2 : 1 }
+        }).sort((a, b) => b.score - a.score)
+        match = scored[0].o
+        console.log(
+          `[sync-tracking] CPF multi-order: ${cpfOrders.length} pedidos, hint="${cleanHint}", ` +
+          `picked id=${match.id} score=${scored[0].score}`
+        )
+      }
+
+      if (!match) {
         return new Response(JSON.stringify({ found: false, reset: !!cleanCartId }), {
           status: 200, headers: { ...CORS, 'Content-Type': 'application/json' },
         })
@@ -260,6 +286,9 @@ serve(async (req) => {
       console.log('[sync-bulk] Exemplo DB data values (primeiros 5):', Object.values(sampleDB?.data ?? {}).slice(0, 5))
       console.log(`[sync-bulk] ${orders.length} orders ME | ${submissions.length} submissões sem tracking no DB`)
 
+      // Palavras-chave de dimensão para matching composto (extraídas do nome dos produtos ME)
+      const DIMENSION_KEYS = ['100k', '250k', '500k', '1m', '2m', '5m', '10m']
+
       let updated = 0
 
       for (const order of orders) {
@@ -277,18 +306,54 @@ serve(async (req) => {
         // Tag injetada no addToCart: tags[0] = submission UUID
         const meTagId = Array.isArray(o.tags) ? String((o.tags as unknown[])[0] ?? '') : ''
 
-        // Hierarquia de match (1-para-1, nunca por CPF se a submission já tem me_cart_id):
+        // Dimensão extraída dos produtos do pedido ME (ex: "100k", "250k")
+        const meProducts = Array.isArray(o.products)
+          ? (o.products as Record<string, unknown>[]).map(p => String(p.name ?? '').toLowerCase()).join(' ')
+          : ''
+        const meDimension = DIMENSION_KEYS.find(k => meProducts.includes(k)) ?? ''
+
+        // Score para desempate quando há múltiplas submissions com mesmo CPF:
+        // 2 = data contém a dimensão do pedido ME (ex: "250K" no título da premiação)
+        // 1 = CPF bate mas sem confirmação de dimensão
+        const scoreSubmission = (sub: typeof submissions[0]): number => {
+          if (!meDimension) return 1
+          const vals = Object.values(sub.data).map(v => String(v).toLowerCase()).join(' ')
+          return vals.includes(meDimension) ? 2 : 1
+        }
+
+        // Hierarquia de match (1-para-1):
         // 1) me_cart_id exato
-        // 2) tags[0] === submission.id  (só funciona para envios gerados após o fix)
-        // 3) CPF — SOMENTE para submissions que ainda não têm me_cart_id
-        const match = submissions.find(sub => {
-          if (sub.me_cart_id && sub.me_cart_id === meId) return true
-          if (meTagId && sub.id === meTagId) return true
-          if (!sub.me_cart_id) {
-            return Object.values(sub.data).some(v => sanitizeDoc(v) === meDoc)
+        // 2) tags[0] === submission.id (envios gerados após o fix)
+        // 3) CPF + matching composto por dimensão — NUNCA sobrescreve submission com me_cart_id já definido
+        let match: typeof submissions[0] | undefined
+
+        // Tier 1: me_cart_id exato
+        match = submissions.find(sub => sub.me_cart_id && sub.me_cart_id === meId)
+
+        // Tier 2: tag UUID
+        if (!match && meTagId) {
+          match = submissions.find(sub => sub.id === meTagId)
+        }
+
+        // Tier 3: CPF + matching composto
+        if (!match) {
+          const cpfMatches = submissions.filter(sub =>
+            !sub.me_cart_id && Object.values(sub.data).some(v => sanitizeDoc(v) === meDoc)
+          )
+          if (cpfMatches.length === 1) {
+            match = cpfMatches[0]
+          } else if (cpfMatches.length > 1) {
+            // Múltiplas submissions com mesmo CPF — usa dimensão do produto como desempate
+            const scored = cpfMatches
+              .map(sub => ({ sub, score: scoreSubmission(sub) }))
+              .sort((a, b) => b.score - a.score)
+            match = scored[0].sub
+            console.log(
+              `[sync-bulk] CPF multi-match: ${cpfMatches.length} subs, meDimension="${meDimension}", ` +
+              `picked id=${match.id} score=${scored[0].score} (runner-up score=${scored[1]?.score ?? '-'})`
+            )
           }
-          return false
-        })
+        }
 
         if (!match) continue
 
