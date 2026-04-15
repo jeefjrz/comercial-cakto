@@ -36,10 +36,13 @@ function extractNome(data: Record<string, string>): string {
 }
 
 function extractProduto(data: Record<string, string>): string {
+  // 1. Campo com nome explícito de produto/prêmio
   const k = Object.keys(data).find(k => /prêmio|premio|produto|item|escolha|award/i.test(k) && !k.startsWith('_'))
   if (k) return data[k]
-  const publicKeys = Object.keys(data).filter(k => !k.startsWith('_'))
-  return publicKeys.length > 0 ? data[publicKeys[publicKeys.length - 1]] || '—' : '—'
+  // 2. Fallback: milestone/dimensão (ex: "250K", "Placa 250K") — evita retornar nome do cliente
+  const meta = extractMeta(data)
+  if (meta) return meta
+  return '—'
 }
 
 /** Extracts the meta/milestone value from submission data */

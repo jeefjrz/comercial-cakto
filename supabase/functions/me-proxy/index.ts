@@ -335,7 +335,7 @@ serve(async (req) => {
           match = submissions.find(sub => sub.id === meTagId)
         }
 
-        // Tier 3: CPF + matching composto
+        // Tier 3: CPF + matching composto por dimensão do produto
         if (!match) {
           const cpfMatches = submissions.filter(sub =>
             !sub.me_cart_id && Object.values(sub.data).some(v => sanitizeDoc(v) === meDoc)
@@ -347,17 +347,29 @@ serve(async (req) => {
             const scored = cpfMatches
               .map(sub => ({ sub, score: scoreSubmission(sub) }))
               .sort((a, b) => b.score - a.score)
-            match = scored[0].sub
-            console.log(
-              `[sync-bulk] CPF multi-match: ${cpfMatches.length} subs, meDimension="${meDimension}", ` +
-              `picked id=${match.id} score=${scored[0].score} (runner-up score=${scored[1]?.score ?? '-'})`
-            )
+            const topScore    = scored[0].score
+            const runnerScore = scored[1]?.score ?? 0
+            if (topScore > runnerScore) {
+              // Vencedor inequívoco — seguro para atribuir
+              match = scored[0].sub
+              console.log(
+                `[sync-bulk] CPF multi-match RESOLVIDO: ${cpfMatches.length} subs, ` +
+                `meDimension="${meDimension}", picked id=${match.id} score=${topScore} vs ${runnerScore}`
+              )
+            } else {
+              // Empate de score — ambíguo demais para arriscar; pula este order
+              console.warn(
+                `[sync-bulk] CPF multi-match AMBÍGUO (${cpfMatches.length} subs, score=${topScore} empatado), ` +
+                `meId=${meId} meDimension="${meDimension}" — order ignorado para evitar rastreio cruzado`
+              )
+            }
           }
         }
 
         if (!match) continue
 
-        console.log(`[sync-bulk] MATCH id=${match.id} meId=${meId} doc=${meDoc} status=${meStatus} track=${track || '(vazio)'}`)
+        // Atualiza EXCLUSIVAMENTE pelo PK (id) — nunca por e-mail ou CPF
+        console.log(`[sync-bulk] UPDATE PK id=${match.id} | meId=${meId} | doc=${meDoc} | status=${meStatus} | track=${track || '(vazio)'}`)
 
         const patch: Record<string, string> = { me_cart_id: meId, status: meStatus }
         if (track) patch.tracking_code = track
