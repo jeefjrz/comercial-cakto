@@ -274,10 +274,20 @@ serve(async (req) => {
 
         if (!meDoc) continue
 
-        // Procura submissão: match por me_cart_id (exato) ou por CPF em qualquer campo JSONB
+        // Tag injetada no addToCart: tags[0] = submission UUID
+        const meTagId = Array.isArray(o.tags) ? String((o.tags as unknown[])[0] ?? '') : ''
+
+        // Hierarquia de match (1-para-1, nunca por CPF se a submission já tem me_cart_id):
+        // 1) me_cart_id exato
+        // 2) tags[0] === submission.id  (só funciona para envios gerados após o fix)
+        // 3) CPF — SOMENTE para submissions que ainda não têm me_cart_id
         const match = submissions.find(sub => {
           if (sub.me_cart_id && sub.me_cart_id === meId) return true
-          return Object.values(sub.data).some(v => sanitizeDoc(v) === meDoc)
+          if (meTagId && sub.id === meTagId) return true
+          if (!sub.me_cart_id) {
+            return Object.values(sub.data).some(v => sanitizeDoc(v) === meDoc)
+          }
+          return false
         })
 
         if (!match) continue

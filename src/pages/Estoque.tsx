@@ -409,6 +409,8 @@ function EstoqueContent() {
       volumes: [{ height: dims.height, width: dims.width, length: dims.length, weight: dims.weight }],
       products: [{ name: meta || 'Premiação', quantity: 1, unitary_value: 1 }],
       options: { insurance_value: 0, receipt: false, own_hand: false, reverse: false, non_commercial: true },
+      // ID único da submission — permite match exato no sync-bulk sem depender de CPF
+      tags: [row.id],
     }
 
     // Valida CPF do destinatário
