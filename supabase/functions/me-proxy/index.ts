@@ -251,9 +251,11 @@ serve(async (req) => {
       }), { status: 200, headers: { ...CORS, 'Content-Type': 'application/json' } })
     }
 
-    // ── 3. Sincronização retroativa em massa ─────────────────────────────────
+    // ── 3. Sincronização retroativa em massa (force-sync + combos) ───────────
     if (action === 'sync-bulk') {
       const sanitizeDoc = (v: unknown): string => v ? String(v).replace(/\D/g, '') : ''
+      // Regex para extrair dimensão do nome do produto (ex: "Placa 100K" → "100K")
+      const DIMENSION_RE = /(10k|50k|100k|250k|500k|1m|2m|5m|10m)/i
 
       // Busca 3 páginas × 100 = até 300 pedidos no ME (mais recentes primeiro)
       const pages = await Promise.all([1, 2, 3].map(page =>
@@ -267,142 +269,139 @@ serve(async (req) => {
         })
       }
 
-      // Force-sync: busca TODAS as submissions (inclusive as que já têm tracking_code)
-      // para poder sobrescrever registros com rastreio errado do bug anterior
+      // Force-sync: todas as submissions, ordenadas da mais antiga para a mais nova.
+      // Ordenação ASC garante que, quando houver múltiplos candidatos com mesma dimensão,
+      // o sistema sempre preenche o registro mais antigo pendente primeiro.
       const subsRes = await fetch(
-        `${SB_URL}/rest/v1/form_submissions?select=id,data,me_cart_id,status,tracking_code&order=submitted_at.desc`,
+        `${SB_URL}/rest/v1/form_submissions?select=id,data,me_cart_id,status,tracking_code,submitted_at&order=submitted_at.asc`,
         { headers: SB_HEADERS }
       )
       const subsText = await subsRes.text()
-      let submissions: Array<{ id: string; data: Record<string, string>; me_cart_id: string; status: string; tracking_code: string }> = []
+      let submissions: Array<{
+        id: string; data: Record<string, string>; me_cart_id: string
+        status: string; tracking_code: string; submitted_at: string
+      }> = []
       try { submissions = JSON.parse(subsText) } catch { console.error('[sync-bulk] parse subs error:', subsText.slice(0, 300)) }
-      console.log('[sync-bulk] HTTP subs status:', subsRes.status, '| rows:', submissions.length)
 
-      // Amostras para debug
       const sampleME    = (orders[0] as Record<string, unknown>)
       const sampleDB    = submissions[0]
       const sampleMEDoc = sanitizeDoc((sampleME?.to as Record<string, unknown>)?.document)
-      console.log('[sync-bulk] Exemplo ME doc (sanitized):', sampleMEDoc)
+      console.log(`[sync-bulk] ${orders.length} orders ME | ${submissions.length} submissions no DB`)
+      console.log('[sync-bulk] Exemplo ME doc:', sampleMEDoc)
       console.log('[sync-bulk] Exemplo DB data keys:', Object.keys(sampleDB?.data ?? {}))
-      console.log('[sync-bulk] Exemplo DB data values (primeiros 5):', Object.values(sampleDB?.data ?? {}).slice(0, 5))
-      console.log(`[sync-bulk] ${orders.length} orders ME | ${submissions.length} submissões no DB`)
-
-      // Palavras-chave de dimensão para matching composto (extraídas do nome dos produtos ME)
-      const DIMENSION_KEYS = ['100k', '250k', '500k', '1m', '2m', '5m', '10m']
 
       let updated = 0
 
       for (const order of orders) {
         const o        = order as Record<string, unknown>
-        const meDoc    = sanitizeDoc((o.to as Record<string, unknown>)?.document)
         const meId     = String(o.id ?? '')
-        // Fallback: tracking → melhorenvio_tracking (etiqueta gerada mas não paga)
         const track    = o.tracking
           ? String(o.tracking)
           : (o.melhorenvio_tracking ? String(o.melhorenvio_tracking) : '')
         const meStatus = ME_STATUS_MAP[String(o.status ?? '')] ?? 'Em Trânsito'
+        const meDoc    = sanitizeDoc((o.to as Record<string, unknown>)?.document)
+        const meEmail  = String((o.to as Record<string, unknown>)?.email ?? '').toLowerCase().trim()
+        const meTagId  = Array.isArray(o.tags) ? String((o.tags as unknown[])[0] ?? '') : ''
 
-        if (!meDoc) continue
+        if (!meDoc && !meEmail) continue
 
-        // Tag injetada no addToCart: tags[0] = submission UUID
-        const meTagId = Array.isArray(o.tags) ? String((o.tags as unknown[])[0] ?? '') : ''
+        // Loop sobre produtos da etiqueta.
+        // Combos (N prêmios na mesma caixa) têm múltiplos itens → N updates com o mesmo tracking.
+        // Envios simples têm 1 item; fallback [{ name: '' }] trata pedidos sem products.
+        const products = Array.isArray(o.products) && (o.products as unknown[]).length > 0
+          ? (o.products as Record<string, unknown>[])
+          : [{ name: '' }]
 
-        // Dimensão extraída dos produtos do pedido ME (ex: "100k", "250k")
-        const meProducts = Array.isArray(o.products)
-          ? (o.products as Record<string, unknown>[]).map(p => String(p.name ?? '').toLowerCase()).join(' ')
-          : ''
-        const meDimension = DIMENSION_KEYS.find(k => meProducts.includes(k)) ?? ''
+        for (const product of products) {
+          const productName = String(product.name ?? '')
+          // Extrai dimensão via regex e normaliza para MAIÚSCULO (ex: "100K", "250K")
+          const dimension = productName.match(DIMENSION_RE)?.[0]?.toUpperCase() ?? ''
 
-        // Email do destinatário no pedido ME
-        const meEmail = String((o.to as Record<string, unknown>)?.email ?? '').toLowerCase().trim()
+          let match: typeof submissions[0] | undefined
 
-        // Score para desempate quando há múltiplos candidatos por CPF/email:
-        // +2 = data contém a dimensão do pedido ME (ex: "250K")
-        // +1 = data contém o email do pedido ME
-        // baseline 1 se só bate CPF
-        const scoreSubmission = (sub: typeof submissions[0]): number => {
-          const vals = Object.values(sub.data).map(v => String(v).toLowerCase()).join(' ')
-          let score = 1
-          if (meDimension && vals.includes(meDimension)) score += 2
-          if (meEmail && vals.includes(meEmail)) score += 1
-          return score
-        }
+          // Tier 1: me_cart_id exato (criado pelo nosso addToCart)
+          match = submissions.find(sub =>
+            sub.me_cart_id && sub.me_cart_id === meId && sub.status !== 'Entregue'
+          )
 
-        // Hierarquia de match (1-para-1):
-        // Tier 1) me_cart_id exato
-        // Tier 2) tags[0] === submission.id
-        // Tier 3) CPF ou email — com scoring por dimensão+email; empate = pula
-        let match: typeof submissions[0] | undefined
+          // Tier 2: tag UUID injetada no addToCart (tags[0] = submission.id)
+          if (!match && meTagId) {
+            match = submissions.find(sub =>
+              sub.id === meTagId && sub.status !== 'Entregue'
+            )
+          }
 
-        // Tier 1: me_cart_id exato
-        match = submissions.find(sub => sub.me_cart_id && sub.me_cart_id === meId)
+          // Tier 3: CPF ou email + dimensão do produto + mais antiga pendente primeiro
+          if (!match) {
+            // Candidatos: batem por CPF ou email; excluem status "Entregue" (já concluídos)
+            // Array já está em ASC por submitted_at → candidates[0] = mais antigo
+            const candidates = submissions.filter(sub => {
+              if (sub.status === 'Entregue') return false
+              const vals = Object.values(sub.data)
+              const byCpf   = meDoc  && vals.some(v => sanitizeDoc(v) === meDoc)
+              const byEmail = meEmail && vals.some(v => String(v).toLowerCase() === meEmail)
+              return byCpf || byEmail
+            })
 
-        // Tier 2: tag UUID
-        if (!match && meTagId) {
-          match = submissions.find(sub => sub.id === meTagId)
-        }
-
-        // Tier 3: CPF ou email + scoring composto por dimensão e email
-        if (!match) {
-          const candidates = submissions.filter(sub => {
-            // Permite candidatos com me_cart_id só se me_cart_id bate (já coberto no Tier 1)
-            // Aqui inclui mesmo quem já tem tracking errado — é exatamente o que queremos corrigir
-            const vals = Object.values(sub.data)
-            const byCpf   = meDoc  && vals.some(v => sanitizeDoc(v) === meDoc)
-            const byEmail = meEmail && vals.some(v => String(v).toLowerCase() === meEmail)
-            return byCpf || byEmail
-          })
-          if (candidates.length === 1) {
-            match = candidates[0]
-          } else if (candidates.length > 1) {
-            const scored = candidates
-              .map(sub => ({ sub, score: scoreSubmission(sub) }))
-              .sort((a, b) => b.score - a.score)
-            const topScore    = scored[0].score
-            const runnerScore = scored[1]?.score ?? 0
-            if (topScore > runnerScore) {
-              match = scored[0].sub
-              console.log(
-                `[sync-bulk] multi-match RESOLVIDO: ${candidates.length} candidatos, ` +
-                `meDimension="${meDimension}" meEmail="${meEmail}", picked id=${match.id} score=${topScore} vs ${runnerScore}`
-              )
-            } else {
-              console.warn(
-                `[sync-bulk] multi-match AMBÍGUO (${candidates.length} candidatos, score=${topScore} empatado), ` +
-                `meId=${meId} meDimension="${meDimension}" meEmail="${meEmail}" — pulado`
-              )
+            if (candidates.length > 0) {
+              if (dimension) {
+                // Filtra pelos que confirmam a dimensão do produto ME
+                const withDim = candidates.filter(sub =>
+                  Object.values(sub.data).some(v =>
+                    String(v).toUpperCase().includes(dimension)
+                  )
+                )
+                // Pega o mais antigo que confirma dimensão; se nenhum confirma, pega o mais antigo geral
+                match = (withDim.length > 0 ? withDim : candidates)[0]
+                if (withDim.length === 0 && candidates.length > 1) {
+                  console.warn(
+                    `[sync-bulk] nenhum candidato confirma dimension="${dimension}" para meId=${meId} ` +
+                    `— usando o mais antigo pendente (${candidates.length} candidatos)`
+                  )
+                }
+              } else {
+                // Sem dimensão no produto ME → mais antigo pendente
+                match = candidates[0]
+              }
+              if (candidates.length > 1) {
+                console.log(
+                  `[sync-bulk] Tier3 multi-match (${candidates.length} candidatos) ` +
+                  `dimension="${dimension}" meEmail="${meEmail}" → picked id=${match!.id}`
+                )
+              }
             }
           }
-        }
 
-        if (!match) continue
+          if (!match) continue
 
-        // Force-sync: sobrescreve tracking_code mesmo se já tiver um (corrige registros errados)
-        // UPDATE exclusivamente pelo PK (id) — nunca por e-mail ou CPF na query SQL
-        const prevTrack = match.tracking_code || '(vazio)'
-        console.log(`[sync-bulk] FORCE UPDATE PK id=${match.id} | meId=${meId} | doc=${meDoc} | track: ${prevTrack} → ${track || '(sem track)'}`)
+          // Force-sync: UPDATE exclusivamente pelo PK (id)
+          const prevTrack = match.tracking_code || '(vazio)'
+          console.log(
+            `[sync-bulk] FORCE UPDATE PK id=${match.id} | product="${productName}" | ` +
+            `dimension="${dimension}" | track: ${prevTrack} → ${track || '(sem track)'}`
+          )
 
-        const patch: Record<string, string> = { me_cart_id: meId, status: meStatus }
-        // Sempre inclui tracking_code — sobrescreve incorretos; se track vazio, mantém o anterior
-        if (track) patch.tracking_code = track
+          const patch: Record<string, string> = { me_cart_id: meId, status: meStatus }
+          if (track) patch.tracking_code = track
 
-        const patchRes = await fetch(
-          `${SB_URL}/rest/v1/form_submissions?id=eq.${match.id}`,
-          {
-            method:  'PATCH',
-            headers: { ...SB_HEADERS, 'Prefer': 'return=minimal' },
-            body:    JSON.stringify(patch),
+          const patchRes = await fetch(
+            `${SB_URL}/rest/v1/form_submissions?id=eq.${match.id}`,
+            {
+              method:  'PATCH',
+              headers: { ...SB_HEADERS, 'Prefer': 'return=minimal' },
+              body:    JSON.stringify(patch),
+            }
+          )
+          if (patchRes.ok) {
+            updated++
+            submissions.splice(submissions.indexOf(match), 1)
+          } else {
+            console.error(`[sync-bulk] PATCH falhou id=${match.id}:`, await patchRes.text())
           }
-        )
-        if (patchRes.ok) {
-          updated++
-          submissions.splice(submissions.indexOf(match), 1)
-        } else {
-          console.error(`[sync-bulk] PATCH falhou id=${match.id}:`, await patchRes.text())
         }
       }
 
-      console.log(`[sync-bulk] ${orders.length} orders ME → ${updated} matches atualizados`)
+      console.log(`[sync-bulk] ${orders.length} orders ME → ${updated} updates`)
 
       // Se nenhum match, devolve amostra para diagnóstico no frontend
       if (updated === 0) {
@@ -412,12 +411,12 @@ serve(async (req) => {
           debug: {
             pendingDbCount: submissions.length,
             subsHttpStatus: subsRes.status,
-            meCPF:      sampleMEDoc,
-            meStatus:   String((sampleME as Record<string, unknown>)?.status ?? ''),
-            dbRowKeys:  Object.keys(sampleDB ?? {}),
-            dbDataKeys: Object.keys(sampleDB?.data ?? {}),
+            meCPF:        sampleMEDoc,
+            meStatus:     String((sampleME as Record<string, unknown>)?.status ?? ''),
+            dbRowKeys:    Object.keys(sampleDB ?? {}),
+            dbDataKeys:   Object.keys(sampleDB?.data ?? {}),
             dbDataValues: Object.values(sampleDB?.data ?? {}).slice(0, 5),
-            dbRowFull:  sampleDB,
+            dbRowFull:    sampleDB,
           },
         }), { status: 200, headers: { ...CORS, 'Content-Type': 'application/json' } })
       }
