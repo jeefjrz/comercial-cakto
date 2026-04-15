@@ -53,20 +53,41 @@ export interface Database {
         Row: {
           id: string; client: string; email: string | null; phone: string | null
           channel: ActivationChannel; responsible: string; date: string; time: string | null
+          sdr_id: string | null; sdr_nome: string | null; sem_sdr: boolean
           created_at: string; updated_at: string
         }
         Insert: {
           id?: string; client: string; email?: string | null; phone?: string | null
           channel: ActivationChannel; responsible: string; date: string; time?: string | null
+          sdr_id?: string | null; sdr_nome?: string | null; sem_sdr?: boolean
           created_at?: string; updated_at?: string
         }
         Update: {
           id?: string; client?: string; email?: string | null; phone?: string | null
           channel?: ActivationChannel; responsible?: string; date?: string; time?: string | null
+          sdr_id?: string | null; sdr_nome?: string | null; sem_sdr?: boolean
           updated_at?: string
         }
         Relationships: [
-          { foreignKeyName: 'activations_responsible_fkey'; columns: ['responsible']; isOneToOne: false; referencedRelation: 'users'; referencedColumns: ['id'] }
+          { foreignKeyName: 'activations_responsible_fkey'; columns: ['responsible']; isOneToOne: false; referencedRelation: 'users'; referencedColumns: ['id'] },
+          { foreignKeyName: 'activations_sdr_id_fkey'; columns: ['sdr_id']; isOneToOne: false; referencedRelation: 'users'; referencedColumns: ['id'] }
+        ]
+      }
+
+      webhook_logs: {
+        Row: {
+          id: string; ativacao_id: string | null; payload: Json
+          status: string; tentativas: number; erro: string | null; created_at: string
+        }
+        Insert: {
+          id?: string; ativacao_id?: string | null; payload: Json
+          status?: string; tentativas?: number; erro?: string | null; created_at?: string
+        }
+        Update: {
+          status?: string; tentativas?: number; erro?: string | null
+        }
+        Relationships: [
+          { foreignKeyName: 'webhook_logs_ativacao_id_fkey'; columns: ['ativacao_id']; isOneToOne: false; referencedRelation: 'activations'; referencedColumns: ['id'] }
         ]
       }
 

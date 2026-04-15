@@ -9,7 +9,8 @@ import { Avatar } from '@/components/ui/Avatar'
 import { Button } from '@/components/ui/Button'
 import { supabase } from '@/lib/supabase/client'
 
-type AuditLog = { id: string; user_name: string; action: string; module: string; created_at: string }
+type AuditLog    = { id: string; user_name: string; action: string; module: string; created_at: string }
+type WebhookLog  = { id: string; ativacao_id: string | null; status: string; tentativas: number; erro: string | null; created_at: string }
 
 const MODULES = [
   { key: 'responsaveis', label: 'Responsáveis', Icon: Users, color: 'var(--action)', desc: 'Gerencie colaboradores e times' },
@@ -25,7 +26,8 @@ export default function Home() {
   const { user, loading } = useAuth()
   const navigate = useNavigate()
   const [kpis, setKpis] = useState({ activeUsers: 0, todayActivations: 0, activeForms: 0, pendingPayments: 0 })
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([])
+  const [auditLogs, setAuditLogs]       = useState<AuditLog[]>([])
+  const [webhookLogs, setWebhookLogs]   = useState<WebhookLog[]>([])
 
   useEffect(() => {
     if (loading || !user || user.role !== 'Admin') return
@@ -36,9 +38,11 @@ export default function Home() {
       supabase.from('forms').select('*', { count: 'exact', head: true }).eq('active', true),
       supabase.from('payments').select('*', { count: 'exact', head: true }).eq('status', 'Pendente'),
       supabase.from('audit_logs').select('id,user_name,action,module,created_at').order('created_at', { ascending: false }).limit(10),
-    ]).then(([{ count: uc }, { count: ac }, { count: fc }, { count: pc }, { data: logs }]) => {
+      supabase.from('webhook_logs').select('id,ativacao_id,status,tentativas,erro,created_at').order('created_at', { ascending: false }).limit(20),
+    ]).then(([{ count: uc }, { count: ac }, { count: fc }, { count: pc }, { data: logs }, { data: wlogs }]) => {
       setKpis({ activeUsers: uc || 0, todayActivations: ac || 0, activeForms: fc || 0, pendingPayments: pc || 0 })
-      if (logs) setAuditLogs(logs as AuditLog[])
+      if (logs)  setAuditLogs(logs as AuditLog[])
+      if (wlogs) setWebhookLogs(wlogs as WebhookLog[])
     })
   }, [user, loading])
 
@@ -105,7 +109,7 @@ export default function Home() {
               <KpiCard label="Formulários" value={kpis.activeForms} icon={FileText} color="var(--green)" />
               <KpiCard label="Pgtos Pendentes" value={kpis.pendingPayments} icon={CreditCard} color="var(--orange)" />
             </div>
-            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, overflow: 'hidden' }}>
+            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, overflow: 'hidden', marginBottom: 16 }}>
               <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontWeight: 700, fontSize: 15 }}>Log de Auditoria</span>
                 <Button size="sm" variant="secondary" onClick={() => navigate('/pagamentos')}>Ver Pagamentos</Button>
@@ -132,6 +136,47 @@ export default function Home() {
                         <td><Badge label={a.module} color="var(--action)" /></td>
                         <td style={{ color: 'var(--text2)', fontSize: 12 }}>
                           {new Date(a.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* ── Webhook Logs (DataCrazy) ── */}
+            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, overflow: 'hidden' }}>
+              <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontWeight: 700, fontSize: 15 }}>Webhook DataCrazy</span>
+                {webhookLogs.some(l => l.status === 'erro') && (
+                  <Badge label={`${webhookLogs.filter(l => l.status === 'erro').length} falha(s)`} color="var(--red)" />
+                )}
+              </div>
+              <div className="scroll-x">
+                <table className="tbl">
+                  <thead>
+                    <tr><th>Status</th><th>Tentativas</th><th>Erro</th><th>Data</th></tr>
+                  </thead>
+                  <tbody>
+                    {webhookLogs.length === 0 ? (
+                      <tr><td colSpan={4} style={{ textAlign: 'center', color: 'var(--text2)', padding: 24 }}>
+                        Nenhum webhook disparado ainda.
+                      </td></tr>
+                    ) : webhookLogs.map(w => (
+                      <tr key={w.id}>
+                        <td>
+                          <Badge
+                            label={w.status === 'sucesso' ? 'Sucesso' : 'Erro'}
+                            color={w.status === 'sucesso' ? 'var(--green)' : 'var(--red)'}
+                          />
+                        </td>
+                        <td style={{ fontSize: 13, color: 'var(--text2)' }}>{w.tentativas}×</td>
+                        <td style={{ fontSize: 12, color: 'var(--red)', maxWidth: 320,
+                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {w.erro || '—'}
+                        </td>
+                        <td style={{ color: 'var(--text2)', fontSize: 12 }}>
+                          {new Date(w.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
                         </td>
                       </tr>
                     ))}

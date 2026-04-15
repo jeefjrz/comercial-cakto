@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, Search, Eye, Edit, Trash2, ChevronLeft, ChevronRight, Loader2, Download } from 'lucide-react'
+import { Plus, Search, Eye, Edit, Trash2, ChevronLeft, ChevronRight, Loader2, Download, AlertTriangle } from 'lucide-react'
 import { useAuth } from '@/lib/authContext'
 import { useToast } from '@/components/ui/Toast'
 import { Header } from '@/components/Header'
@@ -19,12 +19,14 @@ import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, subWeeks, sub
 type DbActivation = {
   id: string; client: string; email: string | null; phone: string | null
   channel: string; responsible: string; date: string; time: string | null
+  sdr_id: string | null; sdr_nome: string | null
 }
 type DbUser  = { id: string; name: string; role: string; team_id: string | null }
 type DbTeam  = { id: string; name: string }
+type AuthUser = { id: string; name: string; role: string; team_id: string | null }
 
 const CHANNELS: ActivationChannel[] = ['Inbound', 'Outbound', 'Indicação']
-const EMPTY_FORM = { client: '', email: '', channel: 'Inbound', responsible: '', date: '', phone: '+55 ' }
+const EMPTY_FORM = { client: '', email: '', channel: 'Inbound', responsible: '', date: '', phone: '+55 ', sdr_id: '' }
 const PER_PAGE = 5
 
 const DEFAULT_RANGE: DateRange = {
@@ -34,8 +36,6 @@ const DEFAULT_RANGE: DateRange = {
 
 export default function Ativacoes() {
   const { user, loading } = useAuth()
-  // Aguarda o perfil real ser carregado antes de avaliar a role,
-  // evitando que isAdmin fique false durante o fetch inicial.
   if (loading) return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
       background: 'var(--bg)', color: 'var(--text2)', fontSize: 14, gap: 10 }}>
@@ -46,12 +46,11 @@ export default function Ativacoes() {
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </div>
   )
-  // case-insensitive: aceita 'Admin', 'admin', 'ADMIN'
   const isAdmin = user?.role?.toLowerCase() === 'admin'
-  return <AtivacoesContent isAdmin={isAdmin} />
+  return <AtivacoesContent isAdmin={isAdmin} currentUser={user as AuthUser | null} />
 }
 
-function AtivacoesContent({ isAdmin }: { isAdmin: boolean }) {
+function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentUser: AuthUser | null }) {
   const toast = useToast()
   const [activations, setActivations] = useState<DbActivation[]>([])
   const [users, setUsers] = useState<DbUser[]>([])
@@ -63,6 +62,7 @@ function AtivacoesContent({ isAdmin }: { isAdmin: boolean }) {
   const [search, setSearch] = useState('')
   const [filterChannel, setFilterChannel] = useState('')
   const [filterUser, setFilterUser] = useState('')
+  const [filterSdr, setFilterSdr] = useState('')
   const [filterTeam, setFilterTeam] = useState('all')
   const [page, setPage] = useState(1)
 
@@ -110,7 +110,7 @@ function AtivacoesContent({ isAdmin }: { isAdmin: boolean }) {
       const [{ data: acts, error: ae }, { data: usrs, error: ue }, { data: tms }] = await Promise.all([
         supabase
           .from('activations')
-          .select('id,client,email,phone,channel,responsible,date,time')
+          .select('id,client,email,phone,channel,responsible,date,time,sdr_id,sdr_nome')
           .gte('date', dateRange.startDate)
           .lte('date', dateRange.endDate)
           .order('date', { ascending: false })
@@ -134,6 +134,15 @@ function AtivacoesContent({ isAdmin }: { isAdmin: boolean }) {
     setForm(p => ({ ...p, [k]: k === 'email' ? e.target.value.toLowerCase() : e.target.value }))
 
   const getUserName = (id: string) => users.find(u => u.id === id)?.name || '—'
+  const getTeamName = (userId: string) => {
+    const tid = users.find(u => u.id === userId)?.team_id ?? null
+    return tid ? (teams.find(t => t.id === tid)?.name ?? '—') : '—'
+  }
+
+  // SDRs disponíveis: filtra pelo time do responsável selecionado no form
+  const responsibleTeamId = users.find(u => u.id === form.responsible)?.team_id ?? null
+  const sdrOptions = users.filter(u => u.role === 'SDR' && u.team_id === responsibleTeamId && responsibleTeamId !== null)
+  const allSdrs = users.filter(u => u.role === 'SDR')
 
   // Ranking: computed from the already-filtered activations (respects date range)
   const rankingDisplay = useMemo(() => {
@@ -153,8 +162,9 @@ function AtivacoesContent({ isAdmin }: { isAdmin: boolean }) {
     const matchS = a.client.toLowerCase().includes(q) || (a.email || '').toLowerCase().includes(q)
     const matchC = !filterChannel || a.channel === filterChannel
     const matchU = !filterUser || a.responsible === filterUser
+    const matchSdr = !filterSdr || a.sdr_id === filterSdr
     const matchT = filterTeam === 'all' || users.find(u => u.id === a.responsible)?.team_id === filterTeam
-    return matchS && matchC && matchU && matchT
+    return matchS && matchC && matchU && matchSdr && matchT
   })
   const totalPages = Math.ceil(filtered.length / PER_PAGE)
   const paginated = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE)
@@ -164,20 +174,11 @@ function AtivacoesContent({ isAdmin }: { isAdmin: boolean }) {
       const s = (v ?? '').replace(/"/g, '""')
       return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s}"` : s
     }
-    const getTeamName = (userId: string) => {
-      const tid = users.find(u => u.id === userId)?.team_id ?? null
-      return tid ? (teams.find(t => t.id === tid)?.name ?? '—') : '—'
-    }
-    const headers = ['Nome do Cliente', 'E-mail', 'Telefone', 'Data de Ativação', 'Hora', 'Canal de Origem', 'Responsável', 'Time']
+    const headers = ['Nome do Cliente', 'E-mail', 'Telefone', 'Data de Ativação', 'Hora', 'Canal de Origem', 'Responsável', 'Time', 'SDR']
     const rows = filtered.map(a => [
-      esc(a.client),
-      esc(a.email),
-      esc(a.phone),
-      esc(formatDate(a.date)),
-      esc(a.time),
-      esc(a.channel),
-      esc(getUserName(a.responsible)),
-      esc(getTeamName(a.responsible)),
+      esc(a.client), esc(a.email), esc(a.phone), esc(formatDate(a.date)), esc(a.time),
+      esc(a.channel), esc(getUserName(a.responsible)), esc(getTeamName(a.responsible)),
+      esc(a.sdr_nome || (a.sdr_id ? getUserName(a.sdr_id) : '—')),
     ].join(','))
     const csv = '\uFEFF' + headers.join(',') + '\n' + rows.join('\n')
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
@@ -196,10 +197,13 @@ function AtivacoesContent({ isAdmin }: { isAdmin: boolean }) {
       toast('Preencha os campos obrigatórios.', 'error'); return
     }
     setIsSaving(true)
+
     if (modalEdit) {
+      const sdrUser = form.sdr_id ? users.find(u => u.id === form.sdr_id) : null
       const patch = {
         client: capitalize(form.client), email: form.email, phone: form.phone || null,
         channel: form.channel as ActivationChannel, responsible: form.responsible, date: form.date,
+        sdr_id: form.sdr_id || null, sdr_nome: sdrUser?.name || null,
       }
       const { error } = await supabase.from('activations').update(patch).eq('id', modalEdit.id)
       setIsSaving(false)
@@ -210,20 +214,38 @@ function AtivacoesContent({ isAdmin }: { isAdmin: boolean }) {
     } else {
       const emailSanitized = form.email.trim().toLowerCase()
 
-      // Pre-check: block duplicate email
+      // Validação: responsável precisa ter time
+      const responsibleUser = users.find(u => u.id === form.responsible)
+      if (!responsibleUser?.team_id) {
+        toast('O Closer selecionado não pertence a nenhum time. Defina um time antes de cadastrar.', 'error')
+        setIsSaving(false); return
+      }
+
+      // Validação: SDR obrigatório se houver SDRs no time
+      if (sdrOptions.length > 0 && !form.sdr_id) {
+        toast('Selecione um SDR responsável.', 'error')
+        setIsSaving(false); return
+      }
+
+      // Pre-check: bloqueia e-mail duplicado
       const { data: existing } = await supabase
         .from('activations').select('id').eq('email', emailSanitized).maybeSingle()
       if (existing) {
         toast('Este e-mail já possui uma ativação cadastrada.', 'error')
-        setIsSaving(false)
-        return
+        setIsSaving(false); return
       }
 
-      const time = new Date().toTimeString().slice(0, 5)
+      const time    = new Date().toTimeString().slice(0, 5)
+      const sdrUser = form.sdr_id ? users.find(u => u.id === form.sdr_id) : null
+      const teamName = teams.find(t => t.id === responsibleUser.team_id)?.name || ''
+
       const row = {
         client: capitalize(form.client), email: emailSanitized, phone: form.phone || null,
         channel: form.channel as ActivationChannel, responsible: form.responsible,
         date: form.date, time,
+        sdr_id:   form.sdr_id || null,
+        sdr_nome: sdrUser?.name || null,
+        sem_sdr:  !form.sdr_id,
       }
       const { data, error } = await supabase.from('activations').insert(row).select().single()
       setIsSaving(false)
@@ -231,12 +253,24 @@ function AtivacoesContent({ isAdmin }: { isAdmin: boolean }) {
         const msg = (error as { code?: string }).code === '23505'
           ? 'Este e-mail já possui uma ativação cadastrada.'
           : error.message
-        toast(msg, 'error')
-        return
+        toast(msg, 'error'); return
       }
       setActivations(p => [data as DbActivation, ...p])
       toast('Cliente ativado com sucesso!', 'success')
       setModalNew(false)
+
+      // Dispara webhook DataCrazy de forma assíncrona — não bloqueia o UI
+      const fechamentoISO = `${form.date}T${time}:00-03:00`
+      void supabase.functions.invoke('datacrazy-webhook', {
+        body: {
+          ativacao_id:    (data as DbActivation).id,
+          closer_id:      form.responsible,
+          closer_nome:    getUserName(form.responsible),
+          time_id:        teamName,
+          data_fechamento: fechamentoISO,
+          canal:          form.channel,
+        },
+      })
     }
     setForm({ ...EMPTY_FORM })
   }
@@ -250,7 +284,8 @@ function AtivacoesContent({ isAdmin }: { isAdmin: boolean }) {
     setModalDel(null)
   }
 
-  // ── Form fields JSX (variable, NOT a component — prevents unmount-on-rerender focus loss) ──
+  // ── Form fields (variable — evita unmount no re-render) ───────────────────
+  const noTeamWarning = form.responsible && !responsibleTeamId
   const formFieldsJSX = (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <Field label="Nome do Cliente" required>
@@ -266,10 +301,45 @@ function AtivacoesContent({ isAdmin }: { isAdmin: boolean }) {
             options={CHANNELS} placeholder="" />
         </Field>
         <Field label="Responsável" required>
-          <Sel value={form.responsible} onChange={v => setForm(p => ({ ...p, responsible: v }))}
+          <Sel value={form.responsible}
+            onChange={v => setForm(p => ({ ...p, responsible: v, sdr_id: '' }))}
             options={users.map(u => ({ value: u.id, label: u.name }))} placeholder="Selecione…" />
         </Field>
       </div>
+
+      {/* Aviso: Closer sem time */}
+      {noTeamWarning && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'color-mix(in srgb, var(--red) 12%, var(--bg-card2))',
+          border: '1px solid color-mix(in srgb, var(--red) 30%, transparent)', borderRadius: 8, padding: '8px 12px', fontSize: 12 }}>
+          <AlertTriangle size={14} color="var(--red)" />
+          <span style={{ color: 'var(--red)', fontWeight: 500 }}>
+            Este Closer não pertence a nenhum time. Defina o time antes de salvar.
+          </span>
+        </div>
+      )}
+
+      {/* SDR Responsável */}
+      <Field label="SDR Responsável" required={sdrOptions.length > 0}>
+        {!form.responsible ? (
+          <div style={{ padding: '8px 12px', fontSize: 12, color: 'var(--text2)', background: 'var(--bg-card2)',
+            border: '1px solid var(--border)', borderRadius: 8 }}>
+            Selecione um Responsável primeiro
+          </div>
+        ) : sdrOptions.length === 0 ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', fontSize: 12,
+            color: 'var(--text2)', background: 'color-mix(in srgb, var(--action) 8%, var(--bg-card2))',
+            border: '1px solid var(--border)', borderRadius: 8 }}>
+            <AlertTriangle size={13} color="var(--action)" />
+            Sem SDRs cadastrados neste time — salvando sem SDR
+          </div>
+        ) : (
+          <Sel value={form.sdr_id}
+            onChange={v => setForm(p => ({ ...p, sdr_id: v }))}
+            options={sdrOptions.map(u => ({ value: u.id, label: u.name }))}
+            placeholder="Selecione o SDR…" />
+        )}
+      </Field>
+
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         <Field label="Data de Ativação" required>
           <input className="inp" type="date" value={form.date} onChange={setF('date')} />
@@ -363,30 +433,16 @@ function AtivacoesContent({ isAdmin }: { isAdmin: boolean }) {
             const weekPct = kpis.weekPrev > 0 ? Math.round((kpis.week - kpis.weekPrev) / kpis.weekPrev * 100) : null
             const monthPct = kpis.monthPrev > 0 ? Math.round((kpis.month - kpis.monthPrev) / kpis.monthPrev * 100) : null
             const cards = [
-              {
-                label: 'Ativações Hoje',
-                value: kpis.today,
+              { label: 'Ativações Hoje', value: kpis.today,
                 sub: todayDiff === 0 ? 'igual a ontem' : `${todayDiff > 0 ? '+' : ''}${todayDiff} vs ontem`,
-                subColor: todayDiff > 0 ? 'var(--green)' : todayDiff < 0 ? 'var(--red)' : 'var(--text2)',
-              },
-              {
-                label: 'Esta Semana',
-                value: kpis.week,
+                subColor: todayDiff > 0 ? 'var(--green)' : todayDiff < 0 ? 'var(--red)' : 'var(--text2)' },
+              { label: 'Esta Semana', value: kpis.week,
                 sub: weekPct === null ? 'sem dados anteriores' : `${weekPct > 0 ? '+' : ''}${weekPct}% vs semana passada`,
-                subColor: weekPct !== null && weekPct > 0 ? 'var(--green)' : weekPct !== null && weekPct < 0 ? 'var(--red)' : 'var(--text2)',
-              },
-              {
-                label: 'Este Mês',
-                value: kpis.month,
+                subColor: weekPct !== null && weekPct > 0 ? 'var(--green)' : weekPct !== null && weekPct < 0 ? 'var(--red)' : 'var(--text2)' },
+              { label: 'Este Mês', value: kpis.month,
                 sub: monthPct === null ? 'sem dados anteriores' : Math.abs(monthPct) <= 5 ? 'Estável' : `${monthPct > 0 ? '+' : ''}${monthPct}% vs mês passado`,
-                subColor: monthPct !== null && monthPct > 5 ? 'var(--green)' : monthPct !== null && monthPct < -5 ? 'var(--red)' : 'var(--text2)',
-              },
-              {
-                label: 'Total Geral',
-                value: kpis.total,
-                sub: 'desde o início',
-                subColor: 'var(--text2)',
-              },
+                subColor: monthPct !== null && monthPct > 5 ? 'var(--green)' : monthPct !== null && monthPct < -5 ? 'var(--red)' : 'var(--text2)' },
+              { label: 'Total Geral', value: kpis.total, sub: 'desde o início', subColor: 'var(--text2)' },
             ]
             return (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
@@ -427,6 +483,12 @@ function AtivacoesContent({ isAdmin }: { isAdmin: boolean }) {
             <Sel value={filterUser} onChange={v => { setFilterUser(v); setPage(1) }}
               options={users.map(u => ({ value: u.id, label: u.name }))} placeholder="Responsável" />
           </div>
+          {allSdrs.length > 0 && (
+            <div style={{ width: 170 }}>
+              <Sel value={filterSdr} onChange={v => { setFilterSdr(v); setPage(1) }}
+                options={allSdrs.map(u => ({ value: u.id, label: u.name }))} placeholder="SDR" />
+            </div>
+          )}
           <div style={{ marginLeft: 'auto' }}>
             <Button variant="secondary" icon={Download} onClick={exportToCSV} disabled={filtered.length === 0}>
               Exportar
@@ -441,51 +503,68 @@ function AtivacoesContent({ isAdmin }: { isAdmin: boolean }) {
               <thead>
                 <tr>
                   <th>Data/Hora</th><th>Cliente</th><th>Email</th>
-                  <th>Canal</th><th>Responsável</th><th>Telefone</th><th>Ações</th>
+                  <th>Canal</th><th>Responsável</th><th>SDR</th><th>Telefone</th><th>Ações</th>
                 </tr>
               </thead>
               <tbody>
                 {paginated.length === 0 && (
-                  <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--text2)', padding: 32 }}>
+                  <tr><td colSpan={8} style={{ textAlign: 'center', color: 'var(--text2)', padding: 32 }}>
                     Nenhuma ativação encontrada.
                   </td></tr>
                 )}
-                {paginated.map(a => (
-                  <tr key={a.id}>
-                    <td style={{ fontSize: 12, color: 'var(--text2)' }}>{formatDate(a.date)} {a.time}</td>
-                    <td style={{ fontWeight: 600 }}>{a.client}</td>
-                    <td style={{ fontSize: 12, color: 'var(--text2)' }}>{a.email}</td>
-                    <td><Badge label={a.channel} color={CHANNEL_COLORS[a.channel] || 'var(--action)'} /></td>
-                    <td>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                        <Avatar name={getUserName(a.responsible)} size={26} />
-                        <span style={{ fontSize: 13, fontWeight: 500 }}>{getUserName(a.responsible).split(' ')[0]}</span>
-                      </div>
-                    </td>
-                    <td style={{ fontSize: 13 }}>{a.phone}</td>
-                    <td>
-                      <div style={{ display: 'flex', gap: 4 }}>
-                        <button title="Ver" onClick={() => setSheetView(a)}
-                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text2)', padding: 4, borderRadius: 6 }}>
-                          <Eye size={16} />
-                        </button>
-                        {isAdmin && (
-                          <>
-                            <button title="Editar"
-                              onClick={() => { setForm({ ...a, email: a.email || '', phone: a.phone || '', responsible: a.responsible }); setModalEdit(a) }}
-                              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--action)', padding: 4, borderRadius: 6 }}>
-                              <Edit size={16} />
-                            </button>
-                            <button title="Excluir" onClick={() => setModalDel(a.id)}
-                              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', padding: 4, borderRadius: 6 }}>
-                              <Trash2 size={16} />
-                            </button>
-                          </>
+                {paginated.map(a => {
+                  const sdrName = a.sdr_nome || (a.sdr_id ? getUserName(a.sdr_id) : null)
+                  return (
+                    <tr key={a.id}>
+                      <td style={{ fontSize: 12, color: 'var(--text2)' }}>{formatDate(a.date)} {a.time}</td>
+                      <td style={{ fontWeight: 600 }}>{a.client}</td>
+                      <td style={{ fontSize: 12, color: 'var(--text2)' }}>{a.email}</td>
+                      <td><Badge label={a.channel} color={CHANNEL_COLORS[a.channel] || 'var(--action)'} /></td>
+                      <td>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                          <Avatar name={getUserName(a.responsible)} size={26} />
+                          <span style={{ fontSize: 13, fontWeight: 500 }}>{getUserName(a.responsible).split(' ')[0]}</span>
+                        </div>
+                      </td>
+                      <td>
+                        {sdrName ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                            <Avatar name={sdrName} size={26} />
+                            <span style={{ fontSize: 13 }}>{sdrName.split(' ')[0]}</span>
+                          </div>
+                        ) : (
+                          <span style={{ fontSize: 12, color: 'var(--text2)' }}>—</span>
                         )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td style={{ fontSize: 13 }}>{a.phone}</td>
+                      <td>
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          <button title="Ver" onClick={() => setSheetView(a)}
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text2)', padding: 4, borderRadius: 6 }}>
+                            <Eye size={16} />
+                          </button>
+                          {isAdmin && (
+                            <>
+                              <button title="Editar"
+                                onClick={() => {
+                                  setForm({ ...a, email: a.email || '', phone: a.phone || '',
+                                    responsible: a.responsible, sdr_id: a.sdr_id || '' })
+                                  setModalEdit(a)
+                                }}
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--action)', padding: 4, borderRadius: 6 }}>
+                                <Edit size={16} />
+                              </button>
+                              <button title="Excluir" onClick={() => setModalDel(a.id)}
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', padding: 4, borderRadius: 6 }}>
+                                <Trash2 size={16} />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
@@ -528,29 +607,33 @@ function AtivacoesContent({ isAdmin }: { isAdmin: boolean }) {
         </Modal>
 
         <Sheet open={!!sheetView} onClose={() => setSheetView(null)} title="Detalhes da Ativação">
-          {sheetView && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                <Avatar name={sheetView.client} size={56} />
-                <div>
-                  <div style={{ fontSize: 20, fontWeight: 700 }}>{sheetView.client}</div>
-                  <div style={{ color: 'var(--text2)', fontSize: 14 }}>{sheetView.email}</div>
+          {sheetView && (() => {
+            const sdrName = sheetView.sdr_nome || (sheetView.sdr_id ? getUserName(sheetView.sdr_id) : null)
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                  <Avatar name={sheetView.client} size={56} />
+                  <div>
+                    <div style={{ fontSize: 20, fontWeight: 700 }}>{sheetView.client}</div>
+                    <div style={{ color: 'var(--text2)', fontSize: 14 }}>{sheetView.email}</div>
+                  </div>
                 </div>
+                <Divider />
+                {([
+                  ['Canal', <Badge key="c" label={sheetView.channel} color={CHANNEL_COLORS[sheetView.channel] || 'var(--action)'} />],
+                  ['Responsável', getUserName(sheetView.responsible)],
+                  ['SDR', sdrName || '—'],
+                  ['Telefone', sheetView.phone || '—'],
+                  ['Data', `${formatDate(sheetView.date)} às ${sheetView.time || ''}`],
+                ] as [string, React.ReactNode][]).map(([l, v]) => (
+                  <div key={l as string} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: 13, color: 'var(--text2)' }}>{l}</span>
+                    <span style={{ fontSize: 14, fontWeight: 600 }}>{v}</span>
+                  </div>
+                ))}
               </div>
-              <Divider />
-              {([
-                ['Canal', <Badge key="c" label={sheetView.channel} color={CHANNEL_COLORS[sheetView.channel] || 'var(--action)'} />],
-                ['Responsável', getUserName(sheetView.responsible)],
-                ['Telefone', sheetView.phone || '—'],
-                ['Data', `${formatDate(sheetView.date)} às ${sheetView.time || ''}`],
-              ] as [string, React.ReactNode][]).map(([l, v]) => (
-                <div key={l as string} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: 13, color: 'var(--text2)' }}>{l}</span>
-                  <span style={{ fontSize: 14, fontWeight: 600 }}>{v}</span>
-                </div>
-              ))}
-            </div>
-          )}
+            )
+          })()}
         </Sheet>
 
         <ConfirmModal open={!!modalDel} onClose={() => setModalDel(null)} onConfirm={doDelete}
