@@ -267,13 +267,14 @@ serve(async (req) => {
         })
       }
 
-      // Busca submissões sem tracking_code (NULL ou string vazia)
+      // Force-sync: busca TODAS as submissions (inclusive as que já têm tracking_code)
+      // para poder sobrescrever registros com rastreio errado do bug anterior
       const subsRes = await fetch(
-        `${SB_URL}/rest/v1/form_submissions?or=(tracking_code.is.null,tracking_code.eq.)&select=id,data,me_cart_id,status`,
+        `${SB_URL}/rest/v1/form_submissions?select=id,data,me_cart_id,status,tracking_code&order=submitted_at.desc`,
         { headers: SB_HEADERS }
       )
       const subsText = await subsRes.text()
-      let submissions: Array<{ id: string; data: Record<string, string>; me_cart_id: string; status: string }> = []
+      let submissions: Array<{ id: string; data: Record<string, string>; me_cart_id: string; status: string; tracking_code: string }> = []
       try { submissions = JSON.parse(subsText) } catch { console.error('[sync-bulk] parse subs error:', subsText.slice(0, 300)) }
       console.log('[sync-bulk] HTTP subs status:', subsRes.status, '| rows:', submissions.length)
 
@@ -284,7 +285,7 @@ serve(async (req) => {
       console.log('[sync-bulk] Exemplo ME doc (sanitized):', sampleMEDoc)
       console.log('[sync-bulk] Exemplo DB data keys:', Object.keys(sampleDB?.data ?? {}))
       console.log('[sync-bulk] Exemplo DB data values (primeiros 5):', Object.values(sampleDB?.data ?? {}).slice(0, 5))
-      console.log(`[sync-bulk] ${orders.length} orders ME | ${submissions.length} submissões sem tracking no DB`)
+      console.log(`[sync-bulk] ${orders.length} orders ME | ${submissions.length} submissões no DB`)
 
       // Palavras-chave de dimensão para matching composto (extraídas do nome dos produtos ME)
       const DIMENSION_KEYS = ['100k', '250k', '500k', '1m', '2m', '5m', '10m']
@@ -312,19 +313,25 @@ serve(async (req) => {
           : ''
         const meDimension = DIMENSION_KEYS.find(k => meProducts.includes(k)) ?? ''
 
-        // Score para desempate quando há múltiplas submissions com mesmo CPF:
-        // 2 = data contém a dimensão do pedido ME (ex: "250K" no título da premiação)
-        // 1 = CPF bate mas sem confirmação de dimensão
+        // Email do destinatário no pedido ME
+        const meEmail = String((o.to as Record<string, unknown>)?.email ?? '').toLowerCase().trim()
+
+        // Score para desempate quando há múltiplos candidatos por CPF/email:
+        // +2 = data contém a dimensão do pedido ME (ex: "250K")
+        // +1 = data contém o email do pedido ME
+        // baseline 1 se só bate CPF
         const scoreSubmission = (sub: typeof submissions[0]): number => {
-          if (!meDimension) return 1
           const vals = Object.values(sub.data).map(v => String(v).toLowerCase()).join(' ')
-          return vals.includes(meDimension) ? 2 : 1
+          let score = 1
+          if (meDimension && vals.includes(meDimension)) score += 2
+          if (meEmail && vals.includes(meEmail)) score += 1
+          return score
         }
 
         // Hierarquia de match (1-para-1):
-        // 1) me_cart_id exato
-        // 2) tags[0] === submission.id (envios gerados após o fix)
-        // 3) CPF + matching composto por dimensão — NUNCA sobrescreve submission com me_cart_id já definido
+        // Tier 1) me_cart_id exato
+        // Tier 2) tags[0] === submission.id
+        // Tier 3) CPF ou email — com scoring por dimensão+email; empate = pula
         let match: typeof submissions[0] | undefined
 
         // Tier 1: me_cart_id exato
@@ -335,32 +342,34 @@ serve(async (req) => {
           match = submissions.find(sub => sub.id === meTagId)
         }
 
-        // Tier 3: CPF + matching composto por dimensão do produto
+        // Tier 3: CPF ou email + scoring composto por dimensão e email
         if (!match) {
-          const cpfMatches = submissions.filter(sub =>
-            !sub.me_cart_id && Object.values(sub.data).some(v => sanitizeDoc(v) === meDoc)
-          )
-          if (cpfMatches.length === 1) {
-            match = cpfMatches[0]
-          } else if (cpfMatches.length > 1) {
-            // Múltiplas submissions com mesmo CPF — usa dimensão do produto como desempate
-            const scored = cpfMatches
+          const candidates = submissions.filter(sub => {
+            // Permite candidatos com me_cart_id só se me_cart_id bate (já coberto no Tier 1)
+            // Aqui inclui mesmo quem já tem tracking errado — é exatamente o que queremos corrigir
+            const vals = Object.values(sub.data)
+            const byCpf   = meDoc  && vals.some(v => sanitizeDoc(v) === meDoc)
+            const byEmail = meEmail && vals.some(v => String(v).toLowerCase() === meEmail)
+            return byCpf || byEmail
+          })
+          if (candidates.length === 1) {
+            match = candidates[0]
+          } else if (candidates.length > 1) {
+            const scored = candidates
               .map(sub => ({ sub, score: scoreSubmission(sub) }))
               .sort((a, b) => b.score - a.score)
             const topScore    = scored[0].score
             const runnerScore = scored[1]?.score ?? 0
             if (topScore > runnerScore) {
-              // Vencedor inequívoco — seguro para atribuir
               match = scored[0].sub
               console.log(
-                `[sync-bulk] CPF multi-match RESOLVIDO: ${cpfMatches.length} subs, ` +
-                `meDimension="${meDimension}", picked id=${match.id} score=${topScore} vs ${runnerScore}`
+                `[sync-bulk] multi-match RESOLVIDO: ${candidates.length} candidatos, ` +
+                `meDimension="${meDimension}" meEmail="${meEmail}", picked id=${match.id} score=${topScore} vs ${runnerScore}`
               )
             } else {
-              // Empate de score — ambíguo demais para arriscar; pula este order
               console.warn(
-                `[sync-bulk] CPF multi-match AMBÍGUO (${cpfMatches.length} subs, score=${topScore} empatado), ` +
-                `meId=${meId} meDimension="${meDimension}" — order ignorado para evitar rastreio cruzado`
+                `[sync-bulk] multi-match AMBÍGUO (${candidates.length} candidatos, score=${topScore} empatado), ` +
+                `meId=${meId} meDimension="${meDimension}" meEmail="${meEmail}" — pulado`
               )
             }
           }
@@ -368,10 +377,13 @@ serve(async (req) => {
 
         if (!match) continue
 
-        // Atualiza EXCLUSIVAMENTE pelo PK (id) — nunca por e-mail ou CPF
-        console.log(`[sync-bulk] UPDATE PK id=${match.id} | meId=${meId} | doc=${meDoc} | status=${meStatus} | track=${track || '(vazio)'}`)
+        // Force-sync: sobrescreve tracking_code mesmo se já tiver um (corrige registros errados)
+        // UPDATE exclusivamente pelo PK (id) — nunca por e-mail ou CPF na query SQL
+        const prevTrack = match.tracking_code || '(vazio)'
+        console.log(`[sync-bulk] FORCE UPDATE PK id=${match.id} | meId=${meId} | doc=${meDoc} | track: ${prevTrack} → ${track || '(sem track)'}`)
 
         const patch: Record<string, string> = { me_cart_id: meId, status: meStatus }
+        // Sempre inclui tracking_code — sobrescreve incorretos; se track vazio, mantém o anterior
         if (track) patch.tracking_code = track
 
         const patchRes = await fetch(

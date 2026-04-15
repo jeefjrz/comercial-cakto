@@ -589,9 +589,9 @@ function EstoqueContent() {
     if (subs) setSubmissions(subs as Submission[])
 
     if (updated === 0) {
-      toast(`Nenhum novo rastreio encontrado (${total} envios verificados no ME).`, 'info')
+      toast(`Nenhum pedido atualizado (${total} envios verificados no ME).`, 'info')
     } else {
-      toast(`${updated} pedido${updated !== 1 ? 's' : ''} recuperado${updated !== 1 ? 's' : ''}! (de ${total} envios no ME)`, 'success')
+      toast(`Sincronização forçada concluída! ${updated} código${updated !== 1 ? 's' : ''} corrigido${updated !== 1 ? 's' : ''} (de ${total} envios no ME).`, 'success')
     }
   }
 
