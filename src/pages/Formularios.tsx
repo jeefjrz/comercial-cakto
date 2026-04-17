@@ -840,10 +840,29 @@ function FormResponses({ form, onBack }: { form: DbForm; onBack: () => void }) {
     if (!form.webhook) { toast('Este formulário não tem webhook configurado.', 'error'); return; }
     setResendingId(row.id);
     try {
+      const rawData = (row.data ?? {}) as Record<string, unknown>
+      const cleanData: Record<string, unknown> = {}
+      for (const [key, value] of Object.entries(rawData)) {
+        const k = key.replace(/^(data_|data-)/i, '').trim().toLowerCase()
+        let uk: string
+        if      (k === 'nome completo' || k === 'nome')                        uk = 'name'
+        else if (k === 'e-mail'        || k === 'email')                       uk = 'email'
+        else if (k === 'whatsapp'      || k === 'telefone' || k === 'celular') uk = 'phone'
+        else if (k === 'cpf'           || k === 'documento')                   uk = 'document'
+        else if (k === 'cep')                                                  uk = 'zipcode'
+        else if (k === 'rua'           || k === 'endereço' || k === 'endereco')uk = 'street'
+        else if (k === 'número'        || k === 'numero')                      uk = 'number'
+        else if (k === 'bairro')                                               uk = 'neighborhood'
+        else if (k === 'cidade')                                               uk = 'city'
+        else if (k === 'estado'        || k === 'uf')                          uk = 'state'
+        else if (k === 'premiação'     || k === 'premiacao')                   uk = 'award'
+        else uk = k.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '')
+        cleanData[uk] = value
+      }
       const res = await fetch(form.webhook, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ form_id: form.id, form_name: form.name, data: row.data, submitted_at: row.submitted_at }),
+        body: JSON.stringify({ form_id: form.id, form_name: form.name, data: cleanData, submitted_at: row.submitted_at }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       toast('Webhook reenviado com sucesso!', 'success');
