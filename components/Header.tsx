@@ -25,7 +25,10 @@ export function Header() {
 
   const nav = [
     ...NAV_ITEMS,
-    ...(user?.role === 'Admin' ? [{ key: 'pagamentos', label: 'Pagamentos' }] : []),
+    ...(user?.role === 'Admin' ? [
+      { key: 'pagamentos',    label: 'Pagamentos'    },
+      { key: 'configuracoes', label: 'Configurações' },
+    ] : []),
   ];
 
   const isActive = (key: string) => pathname === `/${key}`;
