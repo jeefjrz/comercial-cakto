@@ -268,42 +268,36 @@ export default function PublicForm({ customDomain }: Props) {
       })()
     }
 
-    // Fire webhook (non-blocking). mode: no-cors suporta Google Apps Script e outros endpoints sem CORS header.
+    // Fire webhook — transforma chaves PT → universal (name, email, phone…) antes do envio.
     if (form.webhook) {
-      const toUniversalKey = (key: string): string => {
-        const cleanKey = key.replace(/^data_/, '').trim().toLowerCase()
-        const mapping: Record<string, string> = {
-          'nome completo': 'name', 'nome': 'name',
-          'e-mail': 'email', 'email': 'email',
-          'whatsapp': 'phone', 'telefone': 'phone', 'celular': 'phone',
-          'cpf': 'document', 'documento': 'document',
-          'cep': 'zipcode',
-          'rua': 'street', 'endereço': 'street', 'endereco': 'street',
-          'número': 'number', 'numero': 'number',
-          'bairro': 'neighborhood',
-          'cidade': 'city',
-          'estado': 'state', 'uf': 'state',
-        }
-        if (mapping[cleanKey]) return mapping[cleanKey]
-        return cleanKey
-          .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-          .replace(/\s+/g, '_')
-          .replace(/[^a-z0-9_]/g, '')
+      const cleanData: Record<string, unknown> = {}
+      for (const [key, value] of Object.entries(labeledData)) {
+        const k = key.replace(/^data_/, '').trim().toLowerCase()
+        let universalKey: string
+        if (k === 'nome completo' || k === 'nome') universalKey = 'name'
+        else if (k === 'e-mail' || k === 'email') universalKey = 'email'
+        else if (k === 'whatsapp' || k === 'telefone' || k === 'celular') universalKey = 'phone'
+        else if (k === 'cpf' || k === 'documento') universalKey = 'document'
+        else if (k === 'cep') universalKey = 'zipcode'
+        else if (k === 'rua' || k === 'endereço' || k === 'endereco') universalKey = 'street'
+        else if (k === 'número' || k === 'numero') universalKey = 'number'
+        else if (k === 'bairro') universalKey = 'neighborhood'
+        else if (k === 'cidade') universalKey = 'city'
+        else if (k === 'estado' || k === 'uf') universalKey = 'state'
+        else if (k === 'premiação' || k === 'premiacao') universalKey = 'award'
+        else universalKey = k.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '')
+        cleanData[universalKey] = value
       }
-      const payload: { form_id: string; form_name: string; submitted_at: string; data: Record<string, unknown> } = {
+      const finalPayload = {
         form_id: form.id,
         form_name: form.name,
         submitted_at: new Date().toISOString(),
-        data: {},
+        data: cleanData,
       }
-      Object.keys(labeledData).forEach(key => {
-        payload.data[toUniversalKey(key)] = (labeledData as Record<string, unknown>)[key]
-      })
       fetch(form.webhook, {
         method: 'POST',
-        mode: 'no-cors',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(finalPayload),
       }).catch(() => {})
     }
 
