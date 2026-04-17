@@ -262,7 +262,6 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
       // Dispara webhook DataCrazy de forma assíncrona — não bloqueia o UI
       const fechamentoISO = `${form.date}T${time}:00-03:00`
       const closerUser = users.find(u => u.id === form.responsible)
-      const sdrUser    = users.find(u => u.id === form.sdr_id)
       supabase.auth.getSession().then(({ data: { session } }) => {
         void supabase.functions.invoke('datacrazy-webhook', {
           body: {
