@@ -41,22 +41,20 @@ function ConfiguracoesContent() {
   const [testResult, setTestResult] = useState<{ ok: boolean; error?: string } | null>(null)
   const [logs, setLogs]             = useState<WebhookLog[]>([])
 
+  // Usa a Edge Function admin-config (service_role) para evitar 403 do RLS
   async function load() {
     setIsLoading(true)
-    const [{ data: configs }, { data: logsData }] = await Promise.all([
-      supabase.from('configuracoes').select('chave, valor'),
-      supabase
-        .from('webhook_logs')
-        .select('id, ativacao_id, status, tentativas, erro, created_at')
-        .order('created_at', { ascending: false })
-        .limit(10),
-    ])
-    if (configs) {
-      const row = (configs as { chave: string; valor: string | null }[])
-        .find(r => r.chave === 'datacrazy_webhook_url')
-      setWebhookUrl(row?.valor || '')
+    const { data, error } = await supabase.functions.invoke('admin-config', {
+      body: { action: 'get' },
+    })
+    if (error) {
+      toast(error.message, 'error')
+      setIsLoading(false)
+      return
     }
-    if (logsData) setLogs(logsData as WebhookLog[])
+    const result = data as { webhookUrl: string; logs: WebhookLog[] }
+    setWebhookUrl(result.webhookUrl || '')
+    setLogs(result.logs || [])
     setIsLoading(false)
   }
 
@@ -64,10 +62,9 @@ function ConfiguracoesContent() {
 
   async function save() {
     setIsSaving(true)
-    const { error } = await supabase.from('configuracoes').upsert(
-      { chave: 'datacrazy_webhook_url', valor: webhookUrl, updated_at: new Date().toISOString() },
-      { onConflict: 'chave' },
-    )
+    const { error } = await supabase.functions.invoke('admin-config', {
+      body: { action: 'save', webhookUrl },
+    })
     setIsSaving(false)
     if (error) { toast(error.message, 'error'); return }
     toast('Configurações salvas!', 'success')
