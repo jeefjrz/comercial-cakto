@@ -81,7 +81,8 @@ function ConfiguracoesContent() {
         body: { teste: true },
       })
       if (error) { setTestResult({ ok: false, error: error.message }); return }
-      setTestResult(data as { ok: boolean; error?: string })
+      const d = data as { success?: boolean; ok?: boolean; erro?: string; error?: string }
+      setTestResult({ ok: !!(d.success ?? d.ok), error: d.erro ?? d.error })
       load()
     } catch (e) {
       setTestResult({ ok: false, error: String(e) })
