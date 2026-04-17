@@ -261,15 +261,20 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
 
       // Dispara webhook DataCrazy de forma assíncrona — não bloqueia o UI
       const fechamentoISO = `${form.date}T${time}:00-03:00`
-      void supabase.functions.invoke('datacrazy-webhook', {
-        body: {
-          ativacao_id:    (data as DbActivation).id,
-          closer_id:      form.responsible,
-          closer_nome:    getUserName(form.responsible),
-          time_id:        teamName,
-          data_fechamento: fechamentoISO,
-          canal:          form.channel,
-        },
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        void supabase.functions.invoke('datacrazy-webhook', {
+          body: {
+            ativacao_id:     (data as DbActivation).id,
+            closer_id:       form.responsible,
+            closer_nome:     getUserName(form.responsible),
+            time_id:         teamName,
+            data_fechamento: fechamentoISO,
+            canal:           form.channel,
+          },
+          headers: session?.access_token
+            ? { Authorization: `Bearer ${session.access_token}` }
+            : undefined,
+        })
       })
     }
     setForm({ ...EMPTY_FORM })
@@ -303,7 +308,7 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
         <Field label="Responsável" required>
           <Sel value={form.responsible}
             onChange={v => setForm(p => ({ ...p, responsible: v, sdr_id: '' }))}
-            options={users.map(u => ({ value: u.id, label: u.name }))} placeholder="Selecione…" />
+            options={users.filter(u => u.role !== 'Colaborador').map(u => ({ value: u.id, label: u.name }))} placeholder="Selecione…" />
         </Field>
       </div>
 
@@ -481,7 +486,7 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
           )}
           <div style={{ width: 180 }}>
             <Sel value={filterUser} onChange={v => { setFilterUser(v); setPage(1) }}
-              options={users.map(u => ({ value: u.id, label: u.name }))} placeholder="Responsável" />
+              options={users.filter(u => u.role !== 'Colaborador').map(u => ({ value: u.id, label: u.name }))} placeholder="Responsável" />
           </div>
           {allSdrs.length > 0 && (
             <div style={{ width: 170 }}>

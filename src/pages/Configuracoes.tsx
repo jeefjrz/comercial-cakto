@@ -41,11 +41,17 @@ function ConfiguracoesContent() {
   const [testResult, setTestResult] = useState<{ ok: boolean; error?: string } | null>(null)
   const [logs, setLogs]             = useState<WebhookLog[]>([])
 
-  // Usa a Edge Function admin-config (service_role) para evitar 403 do RLS
+  async function authHeaders() {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.access_token) return undefined
+    return { Authorization: `Bearer ${session.access_token}` }
+  }
+
   async function load() {
     setIsLoading(true)
     const { data, error } = await supabase.functions.invoke('admin-config', {
       body: { action: 'get' },
+      headers: await authHeaders(),
     })
     if (error) {
       toast(error.message, 'error')
@@ -64,6 +70,7 @@ function ConfiguracoesContent() {
     setIsSaving(true)
     const { error } = await supabase.functions.invoke('admin-config', {
       body: { action: 'save', webhookUrl },
+      headers: await authHeaders(),
     })
     setIsSaving(false)
     if (error) { toast(error.message, 'error'); return }
@@ -76,6 +83,7 @@ function ConfiguracoesContent() {
     try {
       const { data, error } = await supabase.functions.invoke('datacrazy-webhook', {
         body: { teste: true },
+        headers: await authHeaders(),
       })
       if (error) { setTestResult({ ok: false, error: error.message }); return }
       const d = data as { success?: boolean; ok?: boolean; erro?: string; error?: string }
