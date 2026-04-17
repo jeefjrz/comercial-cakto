@@ -21,7 +21,7 @@ type DbActivation = {
   channel: string; responsible: string; date: string; time: string | null
   sdr_id: string | null; sdr_nome: string | null
 }
-type DbUser  = { id: string; name: string; role: string; team_id: string | null }
+type DbUser  = { id: string; name: string; email: string | null; role: string; team_id: string | null }
 type DbTeam  = { id: string; name: string }
 type AuthUser = { id: string; name: string; role: string; team_id: string | null }
 
@@ -115,7 +115,7 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
           .lte('date', dateRange.endDate)
           .order('date', { ascending: false })
           .order('time', { ascending: false }),
-        supabase.from('users').select('id,name,role,team_id').order('name'),
+        supabase.from('users').select('id,name,email,role,team_id').order('name'),
         supabase.from('teams').select('id,name').order('name'),
       ])
       if (ae) toast(ae.message, 'error')
@@ -261,15 +261,22 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
 
       // Dispara webhook DataCrazy de forma assíncrona — não bloqueia o UI
       const fechamentoISO = `${form.date}T${time}:00-03:00`
+      const closerUser = users.find(u => u.id === form.responsible)
+      const sdrUser    = users.find(u => u.id === form.sdr_id)
       supabase.auth.getSession().then(({ data: { session } }) => {
         void supabase.functions.invoke('datacrazy-webhook', {
           body: {
-            ativacao_id:     (data as DbActivation).id,
-            closer_id:       form.responsible,
-            closer_nome:     getUserName(form.responsible),
-            time_id:         teamName,
-            data_fechamento: fechamentoISO,
-            canal:           form.channel,
+            ativacao_id:      (data as DbActivation).id,
+            closer_id:        form.responsible,
+            closer_email:     closerUser?.email ?? null,
+            time_id:          teamName,
+            data_fechamento:  fechamentoISO,
+            canal:            form.channel,
+            cliente_nome:     capitalize(form.client),
+            cliente_email:    form.email,
+            cliente_telefone: form.phone || null,
+            sdr_id:           form.sdr_id || null,
+            sdr_email:        sdrUser?.email ?? null,
           },
           headers: session?.access_token
             ? { Authorization: `Bearer ${session.access_token}` }
