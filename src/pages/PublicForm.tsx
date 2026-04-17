@@ -270,29 +270,40 @@ export default function PublicForm({ customDomain }: Props) {
 
     // Fire webhook (non-blocking). mode: no-cors suporta Google Apps Script e outros endpoints sem CORS header.
     if (form.webhook) {
-      const formatKey = (key: string): string => {
-        const k = key.trim().toLowerCase()
-        if (k === 'nome completo' || k === 'nome') return 'name'
-        if (k === 'e-mail' || k === 'email') return 'email'
-        if (k === 'whatsapp' || k === 'telefone' || k === 'celular') return 'phone'
-        if (k === 'cpf' || k === 'documento') return 'document'
-        if (k === 'cep') return 'zipcode'
-        if (k === 'rua' || k === 'endereço' || k === 'endereco') return 'street'
-        if (k === 'número' || k === 'numero') return 'number'
-        if (k === 'bairro') return 'neighborhood'
-        if (k === 'cidade') return 'city'
-        if (k === 'estado' || k === 'uf') return 'state'
-        return k.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, '_')
+      const toUniversalKey = (key: string): string => {
+        const cleanKey = key.replace(/^data_/, '').trim().toLowerCase()
+        const mapping: Record<string, string> = {
+          'nome completo': 'name', 'nome': 'name',
+          'e-mail': 'email', 'email': 'email',
+          'whatsapp': 'phone', 'telefone': 'phone', 'celular': 'phone',
+          'cpf': 'document', 'documento': 'document',
+          'cep': 'zipcode',
+          'rua': 'street', 'endereço': 'street', 'endereco': 'street',
+          'número': 'number', 'numero': 'number',
+          'bairro': 'neighborhood',
+          'cidade': 'city',
+          'estado': 'state', 'uf': 'state',
+        }
+        if (mapping[cleanKey]) return mapping[cleanKey]
+        return cleanKey
+          .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+          .replace(/\s+/g, '_')
+          .replace(/[^a-z0-9_]/g, '')
       }
-      const formattedData: Record<string, unknown> = {}
+      const payload: { form_id: string; form_name: string; submitted_at: string; data: Record<string, unknown> } = {
+        form_id: form.id,
+        form_name: form.name,
+        submitted_at: new Date().toISOString(),
+        data: {},
+      }
       Object.keys(labeledData).forEach(key => {
-        formattedData[formatKey(key)] = (labeledData as Record<string, unknown>)[key]
+        payload.data[toUniversalKey(key)] = (labeledData as Record<string, unknown>)[key]
       })
       fetch(form.webhook, {
         method: 'POST',
         mode: 'no-cors',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ form_id: form.id, form_name: form.name, data: formattedData, submitted_at: new Date().toISOString() }),
+        body: JSON.stringify(payload),
       }).catch(() => {})
     }
 
