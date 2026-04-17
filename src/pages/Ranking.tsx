@@ -73,6 +73,7 @@ export default function Ranking() {
     const counts: Record<string, number> = {}
     activations.forEach(a => { counts[a.responsible] = (counts[a.responsible] || 0) + 1 })
     return users
+      .filter(u => u.role !== 'Colaborador')
       .map(u => ({
         userId: u.id, name: u.name, role: u.role,
         team: teams.find(t => t.id === u.team_id)?.name || '—',
