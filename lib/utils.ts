@@ -43,9 +43,9 @@ export const ROLE_COLORS: Record<string, string> = {
   'Closer':            'var(--purple)',
   'SDR':               'var(--action)',
   'Gerente de Contas': 'var(--orange)',
-  'Supervisor':        'var(--cyan)',
   'Head Comercial':    'var(--pink)',
   'Admin':             'var(--text2)',
+  'Colaborador':       'var(--text2)',
 };
 
 export const CHANNEL_COLORS: Record<string, string> = {

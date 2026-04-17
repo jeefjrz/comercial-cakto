@@ -24,14 +24,17 @@ type DbUser = {
   role: string
   team_id: string | null
   active: boolean
+  setor: string | null
 }
+
+const COMMERCIAL_ROLES: string[] = ['SDR', 'Closer', 'Gerente de Contas', 'Head Comercial', 'Admin']
 
 type DbTeam = {
   id: string
   name: string
 }
 
-const ROLES: UserRole[] = ['Closer', 'SDR', 'Gerente de Contas', 'Supervisor', 'Head Comercial', 'Admin'];
+const ROLES: UserRole[] = ['SDR', 'Closer', 'Gerente de Contas', 'Head Comercial', 'Colaborador', 'Admin'];
 
 export default function ResponsaveisPage() {
   const { user, loading } = useAuth();
@@ -42,6 +45,43 @@ export default function ResponsaveisPage() {
   if (loading || !user) return null;
 
   return <ResponsaveisContent isAdmin={user.role === 'Admin'} />;
+}
+
+function UserCard({ u, isAdmin, teamName, onEdit, onToggle }: {
+  u: DbUser; isAdmin: boolean
+  teamName: (id: string | null) => string
+  onEdit: () => void; onToggle: () => void
+}) {
+  const subtitle = u.role === 'Colaborador' ? (u.setor || '—') : teamName(u.team_id)
+  return (
+    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)',
+      borderRadius: 14, padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <Avatar name={u.name} size={46} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--text)',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.name}</div>
+          <div style={{ fontSize: 12, color: 'var(--text2)',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email}</div>
+        </div>
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+        <Badge label={u.role} color={ROLE_COLORS[u.role] || 'var(--action)'} />
+        <Badge label={u.active ? 'Ativo' : 'Inativo'} color={u.active ? 'var(--green)' : 'var(--red)'} />
+        <Badge label={subtitle} color="var(--text2)" />
+      </div>
+      {isAdmin && (
+        <div style={{ display: 'flex', gap: 8, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+          <Button size="sm" variant="secondary" icon={Edit}
+            onClick={onEdit} style={{ flex: 1, justifyContent: 'center' }}>Editar</Button>
+          <Button size="sm" variant={u.active ? 'destructive' : 'secondary'}
+            onClick={onToggle} style={{ flex: 1, justifyContent: 'center' }}>
+            {u.active ? 'Desativar' : 'Reativar'}
+          </Button>
+        </div>
+      )}
+    </div>
+  )
 }
 
 function ResponsaveisContent({ isAdmin }: { isAdmin: boolean }) {
@@ -59,7 +99,7 @@ function ResponsaveisContent({ isAdmin }: { isAdmin: boolean }) {
   const [modalTeam, setModalTeam] = useState<DbTeam | null>(null);
   const [modalNewTeam, setModalNewTeam] = useState(false);
   const [teamNameInput, setTeamNameInput] = useState('');
-  const [form, setForm] = useState({ name: '', role: 'Closer', team_id: '', active: true });
+  const [form, setForm] = useState({ name: '', role: 'Closer', team_id: '', active: true, setor: '' });
 
   // ── Fetch ──────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -67,7 +107,7 @@ function ResponsaveisContent({ isAdmin }: { isAdmin: boolean }) {
       setIsLoading(true);
       const [{ data: teamsData, error: te }, { data: usersData, error: ue }] = await Promise.all([
         supabase.from('teams').select('id, name').order('name'),
-        supabase.from('users').select('id, name, email, role, team_id, active').order('name'),
+        supabase.from('users').select('id, name, email, role, team_id, active, setor').order('name'),
       ]);
       if (te) toast(te.message, 'error');
       if (ue) toast(ue.message, 'error');
@@ -94,6 +134,8 @@ function ResponsaveisContent({ isAdmin }: { isAdmin: boolean }) {
     return (!q || u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q))
       && (!filterRole || u.role === filterRole);
   });
+  const filteredCommercial = filtered.filter(u => COMMERCIAL_ROLES.includes(u.role));
+  const filteredColaboradores = filtered.filter(u => u.role === 'Colaborador');
 
   // ── Actions ────────────────────────────────────────────────────────────────
   const saveEdit = async () => {
@@ -102,7 +144,8 @@ function ResponsaveisContent({ isAdmin }: { isAdmin: boolean }) {
     const patch = {
       name: capitalize(form.name),
       role: form.role as UserRole,
-      team_id: form.team_id || null,
+      team_id: form.role === 'Colaborador' ? null : (form.team_id || null),
+      setor: form.setor || null,
       active: form.active,
     };
     const { error } = await supabase.from('users').update(patch).eq('id', modalEdit.id);
@@ -191,51 +234,45 @@ function ResponsaveisContent({ isAdmin }: { isAdmin: boolean }) {
               </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
-              {filtered.map(u => (
-                <div key={u.id} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)',
-                  borderRadius: 14, padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <Avatar name={u.name} size={46} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--text)',
-                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {u.name}
-                      </div>
-                      <div style={{ fontSize: 12, color: 'var(--text2)',
-                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {u.email}
-                      </div>
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                    <Badge label={u.role} color={ROLE_COLORS[u.role] || 'var(--action)'} />
-                    <Badge label={u.active ? 'Ativo' : 'Inativo'} color={u.active ? 'var(--green)' : 'var(--red)'} />
-                    <Badge label={teamName(u.team_id)} color="var(--text2)" />
-                  </div>
-                  {isAdmin && (
-                    <div style={{ display: 'flex', gap: 8, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
-                      <Button size="sm" variant="secondary" icon={Edit}
-                        onClick={() => {
-                          setForm({ name: u.name, role: u.role, team_id: u.team_id || '', active: u.active });
-                          setModalEdit(u);
-                        }}
-                        style={{ flex: 1, justifyContent: 'center' }}>Editar</Button>
-                      <Button size="sm" variant={u.active ? 'destructive' : 'secondary'}
-                        onClick={() => setModalDeact(u)}
-                        style={{ flex: 1, justifyContent: 'center' }}>
-                        {u.active ? 'Desativar' : 'Reativar'}
-                      </Button>
+            {/* ── Time Comercial ── */}
+            {(filteredCommercial.length > 0 || !filterRole || filterRole !== 'Colaborador') && (
+              <>
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase',
+                  letterSpacing: '.06em', marginBottom: 12 }}>Time Comercial</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16, marginBottom: 28 }}>
+                  {filteredCommercial.map(u => (
+                    <UserCard key={u.id} u={u} isAdmin={isAdmin} teamName={teamName}
+                      onEdit={() => { setForm({ name: u.name, role: u.role, team_id: u.team_id || '', active: u.active, setor: u.setor || '' }); setModalEdit(u); }}
+                      onToggle={() => setModalDeact(u)} />
+                  ))}
+                  {filteredCommercial.length === 0 && (
+                    <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: 24, color: 'var(--text2)', fontSize: 14 }}>
+                      Nenhum membro comercial encontrado.
                     </div>
                   )}
                 </div>
-              ))}
-              {filtered.length === 0 && (
-                <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: 40, color: 'var(--text2)', fontSize: 14 }}>
-                  Nenhum colaborador encontrado.
+              </>
+            )}
+
+            {/* ── Outros Colaboradores ── */}
+            {(filteredColaboradores.length > 0 || !filterRole || filterRole === 'Colaborador') && (
+              <>
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase',
+                  letterSpacing: '.06em', marginBottom: 12 }}>Outros Colaboradores</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
+                  {filteredColaboradores.map(u => (
+                    <UserCard key={u.id} u={u} isAdmin={isAdmin} teamName={teamName}
+                      onEdit={() => { setForm({ name: u.name, role: u.role, team_id: u.team_id || '', active: u.active, setor: u.setor || '' }); setModalEdit(u); }}
+                      onToggle={() => setModalDeact(u)} />
+                  ))}
+                  {filteredColaboradores.length === 0 && (
+                    <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: 24, color: 'var(--text2)', fontSize: 14 }}>
+                      Nenhum colaborador não-comercial encontrado.
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
+              </>
+            )}
           </>
         )}
 
@@ -318,12 +355,19 @@ function ResponsaveisContent({ isAdmin }: { isAdmin: boolean }) {
               <Field label="Cargo">
                 <Sel value={form.role} onChange={v => setForm(p => ({ ...p, role: v }))} options={ROLES} placeholder="" />
               </Field>
-              <Field label="Time">
-                <Sel value={form.team_id}
-                  onChange={v => setForm(p => ({ ...p, team_id: v }))}
-                  options={teams.map(t => ({ label: t.name, value: t.id }))}
-                  placeholder="Sem time" />
-              </Field>
+              {form.role === 'Colaborador' ? (
+                <Field label="Setor">
+                  <input className="inp" value={form.setor} onChange={e => setForm(p => ({ ...p, setor: e.target.value }))}
+                    placeholder="Ex: Marketing, TI…" />
+                </Field>
+              ) : (
+                <Field label="Time">
+                  <Sel value={form.team_id}
+                    onChange={v => setForm(p => ({ ...p, team_id: v }))}
+                    options={teams.map(t => ({ label: t.name, value: t.id }))}
+                    placeholder="Sem time" />
+                </Field>
+              )}
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <Toggle value={form.active} onChange={v => setForm(p => ({ ...p, active: v }))} />
@@ -350,7 +394,7 @@ function ResponsaveisContent({ isAdmin }: { isAdmin: boolean }) {
           title={`Membros — ${modalTeam?.name || ''}`} width={480}
           footer={<Button onClick={() => setModalTeam(null)}>Fechar</Button>}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {users.map(u => {
+            {users.filter(u => COMMERCIAL_ROLES.includes(u.role)).map(u => {
               const isMember = u.team_id === modalTeam?.id;
               return (
                 <div key={u.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0',

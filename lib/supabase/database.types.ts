@@ -9,10 +9,10 @@ export type Json =
 export type UserRole =
   | 'Admin'
   | 'Head Comercial'
-  | 'Supervisor'
   | 'Gerente de Contas'
   | 'Closer'
   | 'SDR'
+  | 'Colaborador'
 
 export type ActivationChannel = 'Inbound' | 'Outbound' | 'Indicação'
 export type FormType           = 'Cadastro' | 'Pesquisa' | 'Indicação' | 'Qualificação' | 'Premiação' | 'Contrato'
@@ -34,15 +34,15 @@ export interface Database {
       users: {
         Row: {
           id: string; name: string; email: string; role: UserRole
-          team_id: string | null; active: boolean; created_at: string; updated_at: string
+          team_id: string | null; active: boolean; setor: string | null; created_at: string; updated_at: string
         }
         Insert: {
           id?: string; name: string; email: string; role?: UserRole
-          team_id?: string | null; active?: boolean; created_at?: string; updated_at?: string
+          team_id?: string | null; active?: boolean; setor?: string | null; created_at?: string; updated_at?: string
         }
         Update: {
           id?: string; name?: string; email?: string; role?: UserRole
-          team_id?: string | null; active?: boolean; updated_at?: string
+          team_id?: string | null; active?: boolean; setor?: string | null; updated_at?: string
         }
         Relationships: [
           { foreignKeyName: 'users_team_id_fkey'; columns: ['team_id']; isOneToOne: false; referencedRelation: 'teams'; referencedColumns: ['id'] }
@@ -225,7 +225,7 @@ export interface Database {
     Views: Record<string, never>
     Functions: Record<string, never>
     Enums: {
-      user_role:          UserRole
+      user_role:          UserRole  // includes 'Colaborador'
       activation_channel: ActivationChannel
       form_type:          FormType
       form_status:        FormStatus
