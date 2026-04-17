@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Eye, EyeOff, CheckCircle, XCircle, RefreshCw, Loader2 } from 'lucide-react'
+import { CheckCircle, XCircle, RefreshCw, Loader2 } from 'lucide-react'
 import { useAuth } from '@/lib/authContext'
 import { useToast } from '@/components/ui/Toast'
 import { Header } from '@/components/Header'
@@ -34,14 +34,12 @@ export default function ConfiguracoesPage() {
 
 function ConfiguracoesContent() {
   const toast = useToast()
-  const [webhookUrl, setWebhookUrl]     = useState('')
-  const [webhookToken, setWebhookToken] = useState('')
-  const [showToken, setShowToken]       = useState(false)
-  const [isLoading, setIsLoading]       = useState(true)
-  const [isSaving, setIsSaving]         = useState(false)
-  const [isTesting, setIsTesting]       = useState(false)
-  const [testResult, setTestResult]     = useState<{ ok: boolean; error?: string } | null>(null)
-  const [logs, setLogs]                 = useState<WebhookLog[]>([])
+  const [webhookUrl, setWebhookUrl] = useState('')
+  const [isLoading, setIsLoading]   = useState(true)
+  const [isSaving, setIsSaving]     = useState(false)
+  const [isTesting, setIsTesting]   = useState(false)
+  const [testResult, setTestResult] = useState<{ ok: boolean; error?: string } | null>(null)
+  const [logs, setLogs]             = useState<WebhookLog[]>([])
 
   async function load() {
     setIsLoading(true)
@@ -54,12 +52,9 @@ function ConfiguracoesContent() {
         .limit(10),
     ])
     if (configs) {
-      const map: Record<string, string> = {}
-      for (const r of (configs as { chave: string; valor: string | null }[])) {
-        map[r.chave] = r.valor ?? ''
-      }
-      setWebhookUrl(map['datacrazy_webhook_url'] || '')
-      setWebhookToken(map['datacrazy_webhook_token'] || '')
+      const row = (configs as { chave: string; valor: string | null }[])
+        .find(r => r.chave === 'datacrazy_webhook_url')
+      setWebhookUrl(row?.valor || '')
     }
     if (logsData) setLogs(logsData as WebhookLog[])
     setIsLoading(false)
@@ -69,20 +64,12 @@ function ConfiguracoesContent() {
 
   async function save() {
     setIsSaving(true)
-    const now = new Date().toISOString()
-    const [r1, r2] = await Promise.all([
-      supabase.from('configuracoes').upsert(
-        { chave: 'datacrazy_webhook_url', valor: webhookUrl, updated_at: now },
-        { onConflict: 'chave' },
-      ),
-      supabase.from('configuracoes').upsert(
-        { chave: 'datacrazy_webhook_token', valor: webhookToken, updated_at: now },
-        { onConflict: 'chave' },
-      ),
-    ])
+    const { error } = await supabase.from('configuracoes').upsert(
+      { chave: 'datacrazy_webhook_url', valor: webhookUrl, updated_at: new Date().toISOString() },
+      { onConflict: 'chave' },
+    )
     setIsSaving(false)
-    const err = r1.error ?? r2.error
-    if (err) { toast(err.message, 'error'); return }
+    if (error) { toast(error.message, 'error'); return }
     toast('Configurações salvas!', 'success')
   }
 
@@ -103,7 +90,7 @@ function ConfiguracoesContent() {
     }
   }
 
-  const isConfigured = !!(webhookUrl.trim() && webhookToken.trim())
+  const isConfigured = !!webhookUrl.trim()
 
   if (isLoading) {
     return (
@@ -146,24 +133,11 @@ function ConfiguracoesContent() {
             />
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 20 }}>
+          <div style={{ marginBottom: 20 }}>
             <Field label="URL do Webhook">
               <input className="inp" value={webhookUrl}
                 onChange={e => setWebhookUrl(e.target.value)}
                 placeholder="https://..." />
-            </Field>
-            <Field label="Token de Autenticação">
-              <div style={{ position: 'relative' }}>
-                <input className="inp" type={showToken ? 'text' : 'password'} value={webhookToken}
-                  onChange={e => setWebhookToken(e.target.value)}
-                  placeholder="Bearer token…"
-                  style={{ paddingRight: 40 }} />
-                <button onClick={() => setShowToken(p => !p)}
-                  style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
-                    background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text2)', padding: 0 }}>
-                  {showToken ? <EyeOff size={16} /> : <Eye size={16} />}
-                </button>
-              </div>
             </Field>
           </div>
 

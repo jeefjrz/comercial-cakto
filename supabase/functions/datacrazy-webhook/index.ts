@@ -2,16 +2,30 @@
 // Supabase Edge Function — datacrazy-webhook
 // Dispara POST para o DataCrazy com retry (até 3 tentativas, 5s de intervalo)
 // e registra resultado na tabela webhook_logs.
-// URL e token são lidos da tabela configuracoes (fallback: env vars).
+// URL é lida da tabela configuracoes (fallback: env var DATACRAZY_WEBHOOK_URL).
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 
 const SB_URL = Deno.env.get('SUPABASE_URL')              ?? ''
 const SB_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
 
-const CORS = {
-  'Access-Control-Allow-Origin':  '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+const ALLOWED_ORIGINS = [
+  'https://www.caktocomercial.site',
+  'https://caktocomercial.site',
+  'https://www.comercialcakto.site',
+  'https://comercialcakto.site',
+  'https://comercial-cakto.vercel.app',
+  'http://localhost:5173',
+  'http://localhost:3000',
+]
+
+function cors(req: Request) {
+  const origin = req.headers.get('Origin') ?? ''
+  return {
+    'Access-Control-Allow-Origin':  ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0],
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  }
 }
 
 const SB_HEADERS = {
@@ -22,30 +36,21 @@ const SB_HEADERS = {
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
-// Lê URL e token da tabela configuracoes; cai nos env vars como fallback
-async function getConfig(): Promise<{ url: string; token: string }> {
-  const fallbackUrl   = Deno.env.get('DATACRAZY_WEBHOOK_URL')   ?? ''
-  const fallbackToken = Deno.env.get('DATACRAZY_WEBHOOK_TOKEN') ?? ''
-
-  if (!SB_URL || !SB_KEY) return { url: fallbackUrl, token: fallbackToken }
+// Lê a URL da tabela configuracoes; cai no env var como fallback
+async function getWebhookUrl(): Promise<string> {
+  const fallback = Deno.env.get('DATACRAZY_WEBHOOK_URL') ?? ''
+  if (!SB_URL || !SB_KEY) return fallback
 
   try {
     const res = await fetch(
-      `${SB_URL}/rest/v1/configuracoes?chave=in.(datacrazy_webhook_url,datacrazy_webhook_token)&select=chave,valor`,
+      `${SB_URL}/rest/v1/configuracoes?chave=eq.datacrazy_webhook_url&select=valor&limit=1`,
       { headers: SB_HEADERS },
     )
-    if (!res.ok) return { url: fallbackUrl, token: fallbackToken }
-
-    const rows = await res.json() as Array<{ chave: string; valor: string | null }>
-    const map: Record<string, string> = {}
-    for (const r of rows) map[r.chave] = r.valor ?? ''
-
-    return {
-      url:   map['datacrazy_webhook_url']   || fallbackUrl,
-      token: map['datacrazy_webhook_token'] || fallbackToken,
-    }
+    if (!res.ok) return fallback
+    const rows = await res.json() as Array<{ valor: string | null }>
+    return rows[0]?.valor || fallback
   } catch {
-    return { url: fallbackUrl, token: fallbackToken }
+    return fallback
   }
 }
 
@@ -69,6 +74,8 @@ async function logResult(
 }
 
 serve(async (req) => {
+  const CORS = cors(req)
+
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS })
 
   try {
@@ -76,7 +83,7 @@ serve(async (req) => {
 
     // ── Modo teste ────────────────────────────────────────────────────────────
     if (body.teste === true) {
-      const { url, token } = await getConfig()
+      const url = await getWebhookUrl()
       if (!url) {
         return new Response(JSON.stringify({ ok: false, error: 'URL do webhook não configurada.' }), {
           status: 200, headers: { ...CORS, 'Content-Type': 'application/json' },
@@ -84,13 +91,10 @@ serve(async (req) => {
       }
       try {
         const res = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-          body: JSON.stringify({
-            teste: true,
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({
+            teste:    true,
             mensagem: 'Teste de integração Comercial Cakto',
             timestamp: new Date().toISOString(),
           }),
@@ -113,7 +117,7 @@ serve(async (req) => {
 
     // ── Fluxo normal ──────────────────────────────────────────────────────────
     const { ativacao_id, closer_id, closer_nome, time_id, data_fechamento, canal } = body
-    const { url: WEBHOOK_URL, token: WEBHOOK_TOKEN } = await getConfig()
+    const WEBHOOK_URL = await getWebhookUrl()
 
     if (!WEBHOOK_URL) {
       console.warn('[datacrazy-webhook] URL não configurada')
@@ -123,20 +127,17 @@ serve(async (req) => {
       })
     }
 
-    const payload = { closer_id, closer_nome, time_id, data_fechamento, canal }
-    let lastError  = ''
-    let tentativas = 0
+    const payload    = { closer_id, closer_nome, time_id, data_fechamento, canal }
+    let lastError    = ''
+    let tentativas   = 0
 
     for (let attempt = 1; attempt <= 3; attempt++) {
       tentativas = attempt
       try {
         const res = await fetch(WEBHOOK_URL, {
           method:  'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(WEBHOOK_TOKEN ? { Authorization: `Bearer ${WEBHOOK_TOKEN}` } : {}),
-          },
-          body: JSON.stringify(payload),
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify(payload),
         })
 
         if (res.ok) {
@@ -166,7 +167,7 @@ serve(async (req) => {
   } catch (err) {
     console.error('[datacrazy-webhook] erro interno:', err)
     return new Response(JSON.stringify({ error: String(err) }), {
-      status: 500, headers: { ...CORS, 'Content-Type': 'application/json' },
+      status: 500, headers: { ...cors(req), 'Content-Type': 'application/json' },
     })
   }
 })
