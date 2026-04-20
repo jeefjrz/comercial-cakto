@@ -10,8 +10,8 @@ import { Avatar } from '@/components/ui/Avatar'
 import { LineAreaChart } from '@/components/ui/charts/LineAreaChart'
 import { BarChartV } from '@/components/ui/charts/BarChartV'
 import {
-  getTPVTime, getMetaTime, setMetaTime,
-  getEvolucaoDiaria, calcularProjecao, getTPVPorMembro,
+  getAtivacoesDoTime, getMetaTime, setMetaTime,
+  getEvolucaoDiariaDoTime, calcularProjecao, getTPVPorMembroDoTime,
 } from '../services/dashboardTimeService'
 import { supabase } from '@/lib/supabase/client'
 
@@ -74,10 +74,10 @@ function DashboardTimeContent({ timeNum, userRole }: { timeNum: string; userRole
     if (!teamId) return
     async function load() {
       const [{ tpvTotal: tv }, metaVal, ev, { porCloser: pc, porSdr: ps }] = await Promise.all([
-        getTPVTime(teamId!),
+        getAtivacoesDoTime(teamId!),
         getMetaTime(timeNum),
-        getEvolucaoDiaria(teamId!),
-        getTPVPorMembro(teamId!),
+        getEvolucaoDiariaDoTime(teamId!),
+        getTPVPorMembroDoTime(teamId!),
       ])
       setTpvTotal(tv)
       setMeta(metaVal)
