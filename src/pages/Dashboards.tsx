@@ -1,11 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-
 import {
   BarChart2, User, TrendingUp, ChevronLeft, LayoutDashboard,
   DollarSign, Phone, Target, Award, CheckCircle, AlertCircle, Loader2, Users,
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/authContext';
 import { useToast } from '@/components/ui/Toast';
 import { Header } from '@/components/Header';

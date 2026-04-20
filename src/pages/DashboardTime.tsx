@@ -12,7 +12,7 @@ import { BarChartV } from '@/components/ui/charts/BarChartV'
 import {
   getTPVTime, getMetaTime, setMetaTime,
   getEvolucaoDiaria, calcularProjecao, getTPVPorMembro,
-} from '@/services/dashboardTimeService'
+} from '../services/dashboardTimeService'
 import { supabase } from '@/lib/supabase/client'
 
 const TIMES = ['01', '02', '03']
