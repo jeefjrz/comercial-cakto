@@ -107,11 +107,14 @@ serve(async (req) => {
       )
     }
 
-    // Modo bulk: processa todas as ativações com email
+    // Modo bulk: processa ativações em lote (padrão: últimas 20 sem cache recente)
+    const limite = Number(body.limite ?? 20)
     const { data: ativacoes, error } = await supabase
       .from('activations')
       .select('id, email, responsible, sdr_id, date')
       .not('email', 'is', null)
+      .order('date', { ascending: false })
+      .limit(limite)
 
     if (error) throw error
 
