@@ -255,6 +255,9 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
       toast('Cliente ativado com sucesso!', 'success')
       setModalNew(false)
 
+      // Calcula TPV via Metabase (fire-and-forget)
+      void supabase.functions.invoke('calcular-tpv', { body: { ativacao_id: (data as DbActivation).id } })
+
       // Dispara webhook DataCrazy de forma assíncrona — não bloqueia o UI
       const fechamentoISO = `${form.date}T${time}:00-03:00`
       const closerUser = users.find(u => u.id === form.responsible)
