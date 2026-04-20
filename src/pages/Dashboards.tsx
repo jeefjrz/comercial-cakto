@@ -3,8 +3,9 @@ import { useNavigate } from 'react-router-dom';
 
 import {
   BarChart2, User, TrendingUp, ChevronLeft, LayoutDashboard,
-  DollarSign, Phone, Target, Award, CheckCircle, AlertCircle, Loader2,
+  DollarSign, Phone, Target, Award, CheckCircle, AlertCircle, Loader2, Users,
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/lib/authContext';
 import { useToast } from '@/components/ui/Toast';
 import { Header } from '@/components/Header';
@@ -74,22 +75,59 @@ export default function DashboardsPage() {
 
 function DashboardsContent() {
   const [view, setView] = useState<DashView>('grid');
+  const navigate = useNavigate();
   if (view === 'sdr')     return <DashSDR     onBack={() => setView('grid')} />;
   if (view === 'gerente') return <DashGerente onBack={() => setView('grid')} />;
   if (view === 'builder') return <DashBuilder onBack={() => setView('grid')} />;
+
+  const panelCards = [
+    { key: 'builder' as DashView, title: 'Dashboard Builder', desc: 'Crie e configure painéis personalizados com gráficos e métricas.',    icon: LayoutDashboard, color: '#3B82F6',       disabled: false },
+    { key: 'sdr'     as DashView, title: 'Dashboard SDR',     desc: 'Produção individual, ranking de ativações e bonificações da equipe.', icon: User,            color: 'var(--action)', disabled: false },
+    { key: 'gerente' as DashView, title: 'Dashboard Gerente', desc: 'Visão geral do time, metas, comissões e churns sob responsabilidade.', icon: TrendingUp,      color: 'var(--purple)', disabled: false },
+    { key: 'grid'    as DashView, title: 'Relatórios',        desc: 'Em breve — relatórios exportáveis, comparativos e histórico.',        icon: BarChart2,       color: 'var(--cyan)',   disabled: true  },
+  ] as const;
+
+  const timeCards = [
+    { num: '01', color: '#F59E0B' },
+    { num: '02', color: '#22C55E' },
+    { num: '03', color: '#A78BFA' },
+  ];
 
   return (
     <>
       <Header />
       <div className="page-wrap">
         <h1 style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-.02em', marginBottom: 24 }}>Dashboards</h1>
+
+        {/* Dashboards de time */}
+        <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.08em', color: 'var(--text2)', marginBottom: 12 }}>
+          TPV por Time
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12, marginBottom: 28 }}>
+          {timeCards.map(tc => (
+            <div key={tc.num} className="card-hover" onClick={() => navigate(`/dashboard/time/${tc.num}`)} style={{
+              background: 'var(--bg-card)', border: `1px solid var(--border)`, borderRadius: 14, padding: 20,
+              cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 12,
+            }}>
+              <div style={{ width: 42, height: 42, borderRadius: 10, background: `color-mix(in srgb, ${tc.color} 15%, transparent)`,
+                display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Users size={20} color={tc.color} />
+              </div>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>Time {tc.num}</div>
+                <div style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.4 }}>TPV acumulado, meta e evolução do time.</div>
+              </div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: tc.color }}>Abrir dashboard →</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Dashboards de painel */}
+        <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.08em', color: 'var(--text2)', marginBottom: 12 }}>
+          Painéis
+        </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 16 }}>
-          {([
-            { key: 'builder'  as DashView, title: 'Dashboard Builder',  desc: 'Crie e configure painéis personalizados com gráficos e métricas.',         icon: LayoutDashboard, color: '#3B82F6',       disabled: false },
-            { key: 'sdr'      as DashView, title: 'Dashboard SDR',     desc: 'Produção individual, ranking de ativações e bonificações da equipe SDR.',      icon: User,            color: 'var(--action)', disabled: false },
-            { key: 'gerente'  as DashView, title: 'Dashboard Gerente', desc: 'Visão geral do time, metas, comissões e churns sob responsabilidade.',          icon: TrendingUp,      color: 'var(--purple)', disabled: false },
-            { key: 'grid'     as DashView, title: 'Relatórios',        desc: 'Em breve — relatórios exportáveis, comparativos e histórico de períodos.',      icon: BarChart2,       color: 'var(--cyan)',   disabled: true  },
-          ] as const).map(card => (
+          {panelCards.map(card => (
             <div key={card.key} className="card-hover" onClick={() => !card.disabled && setView(card.key)} style={{
               background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 16, padding: 24,
               cursor: card.disabled ? 'default' : 'pointer', opacity: card.disabled ? 0.5 : 1,
