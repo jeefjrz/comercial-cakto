@@ -56,9 +56,9 @@ async function processarAtivacao(supabase: unknown, ativacao: Record<string, unk
   const bonusCloser   = tpv30 * 0.002   // 0,20%
   const bonusSdr      = tpv30 * 0.0005  // 0,05%
 
-  // Busca email do closer e SDR
+  // Busca email e team_id do closer; email do SDR
   const { data: closerData } = await (supabase as any)
-    .from('users').select('email').eq('id', ativacao.responsible).maybeSingle()
+    .from('users').select('email, team_id').eq('id', ativacao.responsible).maybeSingle()
   const { data: sdrData } = ativacao.sdr_id
     ? await (supabase as any).from('users').select('email').eq('id', ativacao.sdr_id).maybeSingle()
     : { data: null }
@@ -68,7 +68,7 @@ async function processarAtivacao(supabase: unknown, ativacao: Record<string, unk
     cliente_email:      email,
     closer_email:       closerData?.email ?? null,
     sdr_email:          sdrData?.email ?? null,
-    time_id:            ativacao.team_id ?? null,
+    time_id:            closerData?.team_id ?? null,
     data_fechamento:    ativacao.date,
     tpv_30_dias:        tpv30,
     tpv_7_dias:         tpv7,
@@ -96,7 +96,7 @@ serve(async (req) => {
     if (body.ativacao_id) {
       const { data: ativacao, error } = await supabase
         .from('activations')
-        .select('id, email, responsible, sdr_id, date, team_id')
+        .select('id, email, responsible, sdr_id, date')
         .eq('id', body.ativacao_id)
         .single()
       if (error || !ativacao) throw new Error(`Ativação não encontrada: ${body.ativacao_id}`)
@@ -110,7 +110,7 @@ serve(async (req) => {
     // Modo bulk: processa todas as ativações com email
     const { data: ativacoes, error } = await supabase
       .from('activations')
-      .select('id, email, responsible, sdr_id, date, team_id')
+      .select('id, email, responsible, sdr_id, date')
       .not('email', 'is', null)
 
     if (error) throw error

@@ -2,6 +2,10 @@
 -- Migration 019: Tabela de cache de TPV por ativação
 -- ============================================================
 
+-- Garante que service_role tenha acesso às tabelas usadas pela Edge Function
+GRANT ALL ON public.activations TO service_role;
+GRANT ALL ON public.users       TO service_role;
+
 CREATE TABLE IF NOT EXISTS public.tpv_cache (
   id                serial       PRIMARY KEY,
   ativacao_id       varchar(255) UNIQUE,
