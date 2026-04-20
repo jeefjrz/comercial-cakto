@@ -221,11 +221,7 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
         setIsSaving(false); return
       }
 
-      // Validação: SDR obrigatório se houver SDRs no time
-      if (sdrOptions.length > 0 && !form.sdr_id) {
-        toast('Selecione um SDR responsável.', 'error')
-        setIsSaving(false); return
-      }
+
 
       // Pre-check: bloqueia e-mail duplicado
       const { data: existing } = await supabase
@@ -330,7 +326,7 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
       )}
 
       {/* SDR Responsável */}
-      <Field label="SDR Responsável" required={sdrOptions.length > 0}>
+      <Field label="SDR Responsável">
         {!form.responsible ? (
           <div style={{ padding: '8px 12px', fontSize: 12, color: 'var(--text2)', background: 'var(--bg-card2)',
             border: '1px solid var(--border)', borderRadius: 8 }}>
