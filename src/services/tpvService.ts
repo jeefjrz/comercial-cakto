@@ -9,11 +9,14 @@
  */
 import { supabase } from '../lib/supabase/client'
 
+const DATA_INICIO_REGRA = new Date('2026-04-01T00:00:00.000Z')
+
 export async function getTPVPorTime(): Promise<Record<string, number>> {
   const { data } = await supabase
     .from('tpv_cache')
     .select('time_id, tpv_30_dias')
     .not('time_id', 'is', null)
+    .gte('data_fechamento', DATA_INICIO_REGRA.toISOString())
 
   const consolidado: Record<string, number> = {}
   data?.forEach(row => {
@@ -27,6 +30,7 @@ export async function getTPVPorCloser(): Promise<Record<string, { tpv: number; b
     .from('tpv_cache')
     .select('closer_email, tpv_30_dias, bonus_closer')
     .not('closer_email', 'is', null)
+    .gte('data_fechamento', DATA_INICIO_REGRA.toISOString())
 
   const consolidado: Record<string, { tpv: number; bonus: number }> = {}
   data?.forEach(row => {
@@ -42,6 +46,7 @@ export async function getTPVPorSDR(): Promise<Record<string, { tpv: number; bonu
     .from('tpv_cache')
     .select('sdr_email, tpv_30_dias, bonus_sdr')
     .not('sdr_email', 'is', null)
+    .gte('data_fechamento', DATA_INICIO_REGRA.toISOString())
 
   const consolidado: Record<string, { tpv: number; bonus: number }> = {}
   data?.forEach(row => {
@@ -65,6 +70,7 @@ export async function getTPVConsolidadoHead() {
   const { data } = await supabase
     .from('tpv_cache')
     .select('time_id, tpv_30_dias')
+    .gte('data_fechamento', DATA_INICIO_REGRA.toISOString())
 
   let totalGeral = 0
   const porTime: Record<string, number> = {}

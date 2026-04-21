@@ -11,6 +11,9 @@
  */
 import { supabase } from '@/lib/supabase/client'
 
+// Data de início da nova regra de bonificação
+const DATA_INICIO_REGRA = new Date('2026-04-01T00:00:00.000Z')
+
 const TIMES_UUID: { [nome: string]: string } = {
   '01': '63d33c9a-fad3-4095-8be6-39f84dda7519',
   '02': 'c37cfdfe-755c-428e-b132-13fd7c90ea7b',
@@ -37,11 +40,14 @@ export async function getTPVDoTime(timeId: string) {
   const trintaDiasAtras = new Date()
   trintaDiasAtras.setDate(trintaDiasAtras.getDate() - 30)
 
+  // Usar a maior data entre 30 dias atrás e 01/04/2026
+  const dataInicio = trintaDiasAtras > DATA_INICIO_REGRA ? trintaDiasAtras : DATA_INICIO_REGRA
+
   const { data } = await supabase
     .from('tpv_cache')
     .select('tpv_30_dias, tpv_7_dias, closer_email, sdr_email, cliente_email, data_fechamento, ultima_atualizacao')
     .eq('time_id', timeNome)
-    .gte('data_fechamento', trintaDiasAtras.toISOString())
+    .gte('data_fechamento', dataInicio.toISOString())
 
   const tpvTotal = data?.reduce((acc, row) => acc + Number(row.tpv_30_dias), 0) ?? 0
   return { tpvTotal, ativacoes: data ?? [] }
@@ -74,12 +80,19 @@ export async function getTPVPorMembro(timeId: string) {
 
 // ─── Evolução diária ──────────────────────────────────────────────────────────
 export async function getEvolucaoDiaria(timeId: string) {
-  const { ativacoes } = await getTPVDoTime(timeId)
+  const timeNome = `Time ${timeId}`
+
+  const { data } = await supabase
+    .from('tpv_cache')
+    .select('tpv_30_dias, data_fechamento')
+    .eq('time_id', timeNome)
+    .gte('data_fechamento', DATA_INICIO_REGRA.toISOString())
+    .order('data_fechamento', { ascending: true })
 
   const porDia: { [dia: string]: number } = {}
-  ativacoes.forEach(a => {
-    const dia = new Date(a.data_fechamento).toISOString().split('T')[0]
-    porDia[dia] = (porDia[dia] ?? 0) + Number(a.tpv_30_dias)
+  data?.forEach(row => {
+    const dia = new Date(row.data_fechamento).toISOString().split('T')[0]
+    porDia[dia] = (porDia[dia] ?? 0) + Number(row.tpv_30_dias)
   })
 
   let acumulado = 0

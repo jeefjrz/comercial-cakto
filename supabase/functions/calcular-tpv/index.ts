@@ -33,6 +33,8 @@ const METABASE_URL = Deno.env.get('METABASE_URL') ?? '';
 const METABASE_API_KEY = Deno.env.get('METABASE_API_KEY') ?? '';
 const CARD_TPV = 2107;
 
+const DATA_INICIO_REGRA = '2026-04-01'
+
 const TIMES: { [uuid: string]: string } = {
   '63d33c9a-fad3-4095-8be6-39f84dda7519': 'Time 01',
   'c37cfdfe-755c-428e-b132-13fd7c90ea7b': 'Time 02',
@@ -101,6 +103,7 @@ serve(async (req) => {
         )
       `)
       .not('email', 'is', null)
+      .gte('date', DATA_INICIO_REGRA)
       .order('created_at', { ascending: false });
 
     if (ativacaoId) {
