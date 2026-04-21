@@ -1,4 +1,25 @@
 // @ts-nocheck
+/**
+ * Edge Function: calcular-tpv
+ *
+ * Calcula o TPV (Volume Total de Pagamentos) de cada cliente ativado
+ * consultando a API do Metabase (card 2107), que por sua vez acessa
+ * o banco de pagamentos do DataCrazy.
+ *
+ * Fluxo:
+ * 1. Busca ativações do Supabase
+ * 2. Para cada ativação, chama o Metabase API com email + janela de datas
+ * 3. Metabase retorna TPV do cliente no período
+ * 4. Resultado é salvo no tpv_cache do Supabase
+ *
+ * Parâmetros:
+ * - limite: número de ativações a processar (padrão: 50)
+ * - ativacao_id: processar uma ativação específica
+ *
+ * Janelas calculadas:
+ * - tpv_30_dias: TPV nos 30 dias após a ativação (usado para bônus mensal)
+ * - tpv_7_dias: TPV nos 7 dias após a ativação (usado para gatilho da roleta)
+ */
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
@@ -91,6 +112,10 @@ serve(async (req) => {
     const { data: ativacoes, error } = await query;
     if (error) throw error;
 
+    console.log('[calcular-tpv] SUPABASE_URL:', Deno.env.get('SUPABASE_URL')?.substring(0, 30));
+    console.log('[calcular-tpv] SERVICE_KEY existe:', !!Deno.env.get('SUPABASE_SERVICE_ROLE_KEY'));
+    console.log('[calcular-tpv] SERVICE_KEY início:', Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')?.substring(0, 20));
+
     const resultados = [];
 
     for (const ativacao of ativacoes ?? []) {
@@ -118,7 +143,7 @@ serve(async (req) => {
       const bonusCloser = tpv30 * 0.002;
       const bonusSdr = tpv30 * 0.0005;
 
-      await supabase
+      const { error: upsertError } = await supabase
         .from('tpv_cache')
         .upsert({
           ativacao_id: ativacao.id,
@@ -134,6 +159,10 @@ serve(async (req) => {
           bonus_sdr: bonusSdr,
           ultima_atualizacao: new Date().toISOString()
         }, { onConflict: 'ativacao_id' });
+
+      if (upsertError) {
+        console.error('[calcular-tpv] ERRO no upsert:', JSON.stringify(upsertError));
+      }
 
       resultados.push({
         ativacao_id: ativacao.id,

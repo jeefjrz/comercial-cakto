@@ -1,3 +1,12 @@
+/**
+ * Serviço de TPV
+ *
+ * Consulta o tpv_cache do Supabase, que é populado pela
+ * Edge Function calcular-tpv via API do Metabase.
+ *
+ * Os valores de TPV refletem pagamentos reais processados
+ * no DataCrazy, consultados através do Metabase.
+ */
 import { supabase } from '../lib/supabase/client'
 
 export async function getTPVPorTime(): Promise<Record<string, number>> {

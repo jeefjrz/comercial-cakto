@@ -1,3 +1,14 @@
+/**
+ * Serviço de Dashboard por Time
+ *
+ * Dados de TPV vêm do tpv_cache (Supabase), populado pela
+ * Edge Function calcular-tpv que consulta o Metabase API.
+ *
+ * Origem dos dados:
+ * - Membros e ativações: Supabase (banco do sistema comercial)
+ * - TPV dos clientes: Metabase → DataCrazy (banco de pagamentos)
+ * - Cache: tpv_cache no Supabase (atualizado pela Edge Function)
+ */
 import { supabase } from '@/lib/supabase/client'
 
 const TIMES_UUID: { [nome: string]: string } = {

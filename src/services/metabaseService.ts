@@ -1,3 +1,13 @@
+/**
+ * Serviço de integração com o Metabase
+ *
+ * O Metabase atua como intermediário entre o sistema comercial
+ * e o banco de pagamentos do DataCrazy. Todas as consultas de TPV
+ * são feitas via API do Metabase, nunca diretamente ao DataCrazy.
+ *
+ * Card utilizado: 2107 (TPV por Ativação)
+ * Parâmetros: email, data_inicio, data_fim
+ */
 const METABASE_URL = import.meta.env.VITE_METABASE_URL as string
 const METABASE_API_KEY = import.meta.env.VITE_METABASE_API_KEY as string
 const CARD_TPV = Number(import.meta.env.VITE_METABASE_CARD_TPV) // 2107
