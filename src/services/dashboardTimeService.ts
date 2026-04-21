@@ -1,84 +1,74 @@
 import { supabase } from '@/lib/supabase/client'
 
-// ─── helpers ───────────────────────────────────────────────────────────────
-function trintaDiasAtrasStr(): string {
-  const d = new Date()
-  d.setDate(d.getDate() - 30)
-  return d.toISOString().split('T')[0] // "YYYY-MM-DD"
+const TIMES_UUID: { [nome: string]: string } = {
+  '01': '63d33c9a-fad3-4095-8be6-39f84dda7519',
+  '02': 'c37cfdfe-755c-428e-b132-13fd7c90ea7b',
+  '03': '92f0c8fa-03c6-46e5-b97a-5ef544a9e183',
 }
 
-// ─── Busca ativações do time nos últimos 30 dias, cruzando com tpv_cache ────
-export async function getAtivacoesDoTime(teamId: string) {
-  // 1. Membros do time
-  const { data: members } = await supabase
+// ─── Membros do time ─────────────────────────────────────────────────────────
+export async function getMembrosDoTime(timeId: string) {
+  const teamUuid = TIMES_UUID[timeId]
+  if (!teamUuid) return []
+
+  const { data } = await supabase
     .from('users')
-    .select('id, email, name, role')
-    .eq('team_id', teamId)
+    .select('id, name, email, role')
+    .eq('team_id', teamUuid)
+    .in('role', ['SDR', 'Closer', 'Gerente de Contas'])
 
-  const memberIds = (members ?? []).map(m => m.id)
-  if (memberIds.length === 0) return { ativacoes: [], tpvTotal: 0 }
+  return data ?? []
+}
 
-  // Email map: userId → email
-  const emailMap: Record<string, string | null> = {}
-  ;(members ?? []).forEach(m => { emailMap[m.id] = m.email })
+// ─── TPV do time pelo tpv_cache ──────────────────────────────────────────────
+export async function getTPVDoTime(timeId: string) {
+  const timeNome = `Time ${timeId}`
+  const trintaDiasAtras = new Date()
+  trintaDiasAtras.setDate(trintaDiasAtras.getDate() - 30)
 
-  // 2. Ativações dos membros nos últimos 30 dias (campo date é "YYYY-MM-DD")
-  const { data: ativacoes } = await supabase
-    .from('activations')
-    .select('id, email, responsible, sdr_id, date')
-    .in('responsible', memberIds)
-    .gte('date', trintaDiasAtrasStr())
-    .order('date', { ascending: false })
-
-  if (!ativacoes || ativacoes.length === 0) return { ativacoes: [], tpvTotal: 0 }
-
-  const ativacaoIds = ativacoes.map(a => a.id)
-
-  // 3. Busca tpv_cache de uma vez (sem N+1)
-  const { data: cache } = await supabase
+  const { data } = await supabase
     .from('tpv_cache')
-    .select('ativacao_id, tpv_30_dias, tpv_7_dias, gatilho_roleta, closer_email, sdr_email')
-    .in('ativacao_id', ativacaoIds)
+    .select('tpv_30_dias, tpv_7_dias, closer_email, sdr_email, cliente_email, data_fechamento, ultima_atualizacao')
+    .eq('time_id', timeNome)
+    .gte('data_fechamento', trintaDiasAtras.toISOString())
 
-  const cacheMap: Record<string, typeof cache extends (infer T)[] | null ? T : never> = {}
-  ;(cache ?? []).forEach(c => { cacheMap[c.ativacao_id] = c })
-
-  // 4. Combina
-  const ativacoesComTPV = ativacoes.map(a => ({
-    ...a,
-    closer_email: emailMap[a.responsible] ?? null,
-    sdr_email: a.sdr_id ? emailMap[a.sdr_id] ?? null : null,
-    tpv_30_dias:    Number(cacheMap[a.id]?.tpv_30_dias    ?? 0),
-    tpv_7_dias:     Number(cacheMap[a.id]?.tpv_7_dias     ?? 0),
-    gatilho_roleta: cacheMap[a.id]?.gatilho_roleta         ?? false,
-  }))
-
-  const tpvTotal = ativacoesComTPV.reduce((acc, a) => acc + a.tpv_30_dias, 0)
-  return { ativacoes: ativacoesComTPV, tpvTotal }
+  const tpvTotal = data?.reduce((acc, row) => acc + Number(row.tpv_30_dias), 0) ?? 0
+  return { tpvTotal, ativacoes: data ?? [] }
 }
 
-// ─── TPV por membro ────────────────────────────────────────────────────────
-export async function getTPVPorMembroDoTime(teamId: string) {
-  const { ativacoes } = await getAtivacoesDoTime(teamId)
+// ─── TPV por membro ──────────────────────────────────────────────────────────
+export async function getTPVPorMembro(timeId: string) {
+  const [{ ativacoes }, membros] = await Promise.all([
+    getTPVDoTime(timeId),
+    getMembrosDoTime(timeId),
+  ])
 
-  const porCloser: Record<string, number> = {}
-  const porSdr:    Record<string, number> = {}
+  return membros.map(membro => {
+    const tpvCloser = ativacoes
+      .filter(a => a.closer_email === membro.email)
+      .reduce((acc, a) => acc + Number(a.tpv_30_dias), 0)
 
-  ativacoes.forEach(a => {
-    if (a.closer_email) porCloser[a.closer_email] = (porCloser[a.closer_email] ?? 0) + a.tpv_30_dias
-    if (a.sdr_email)    porSdr[a.sdr_email]       = (porSdr[a.sdr_email]       ?? 0) + a.tpv_30_dias
+    const tpvSdr = ativacoes
+      .filter(a => a.sdr_email === membro.email)
+      .reduce((acc, a) => acc + Number(a.tpv_30_dias), 0)
+
+    return {
+      ...membro,
+      tpv_closer: tpvCloser,
+      tpv_sdr: tpvSdr,
+      tpv_total: tpvCloser + tpvSdr,
+    }
   })
-
-  return { porCloser, porSdr }
 }
 
-// ─── Evolução diária (acumulada) ──────────────────────────────────────────
-export async function getEvolucaoDiariaDoTime(teamId: string) {
-  const { ativacoes } = await getAtivacoesDoTime(teamId)
+// ─── Evolução diária ──────────────────────────────────────────────────────────
+export async function getEvolucaoDiaria(timeId: string) {
+  const { ativacoes } = await getTPVDoTime(timeId)
 
-  const porDia: Record<string, number> = {}
+  const porDia: { [dia: string]: number } = {}
   ativacoes.forEach(a => {
-    porDia[a.date] = (porDia[a.date] ?? 0) + a.tpv_30_dias
+    const dia = new Date(a.data_fechamento).toISOString().split('T')[0]
+    porDia[dia] = (porDia[dia] ?? 0) + Number(a.tpv_30_dias)
   })
 
   let acumulado = 0
@@ -90,7 +80,7 @@ export async function getEvolucaoDiariaDoTime(teamId: string) {
     })
 }
 
-// ─── Meta configurável ────────────────────────────────────────────────────
+// ─── Meta configurável ────────────────────────────────────────────────────────
 export async function getMetaTime(timeNum: string): Promise<number> {
   const chave = `meta_tpv_time_${timeNum.padStart(2, '0')}`
   const { data } = await supabase
@@ -108,11 +98,11 @@ export async function setMetaTime(timeNum: string, valor: number) {
     .upsert({ chave, valor: String(valor) }, { onConflict: 'chave' })
 }
 
-// ─── Projeção de fim de mês ───────────────────────────────────────────────
+// ─── Projeção de fim de mês ───────────────────────────────────────────────────
 export function calcularProjecao(evolucao: { dia: string; acumulado: number }[]): number {
   if (evolucao.length < 2) return 0
   const diasNoMes = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate()
-  const diaAtual  = new Date().getDate()
-  const tpvAtual  = evolucao[evolucao.length - 1]?.acumulado ?? 0
+  const diaAtual = new Date().getDate()
+  const tpvAtual = evolucao[evolucao.length - 1]?.acumulado ?? 0
   return diaAtual > 0 ? (tpvAtual / diaAtual) * diasNoMes : 0
 }

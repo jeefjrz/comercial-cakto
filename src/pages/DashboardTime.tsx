@@ -5,22 +5,22 @@ import { useAuth } from '@/lib/authContext'
 import { Header } from '@/components/Header'
 import { Button } from '@/components/ui/Button'
 import { KpiCard } from '@/components/ui/KpiCard'
-import { Modal } from '@/components/ui/Modal'
 import { Avatar } from '@/components/ui/Avatar'
 import { LineAreaChart } from '@/components/ui/charts/LineAreaChart'
 import { BarChartV } from '@/components/ui/charts/BarChartV'
 import {
-  getAtivacoesDoTime, getMetaTime, setMetaTime,
-  getEvolucaoDiariaDoTime, calcularProjecao, getTPVPorMembroDoTime,
+  getTPVDoTime, getMetaTime, setMetaTime,
+  getEvolucaoDiaria, calcularProjecao, getTPVPorMembro,
 } from '../services/dashboardTimeService'
-import { supabase } from '@/lib/supabase/client'
 
 const TIMES = ['01', '02', '03']
 const BRL = (v: number) =>
   v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 })
 
-type DbUser = { id: string; name: string; email: string | null; role: string; team_id: string | null }
-type DbTeam = { id: string; name: string }
+type MembroTPV = {
+  id: string; name: string; email: string | null; role: string;
+  tpv_closer: number; tpv_sdr: number; tpv_total: number
+}
 
 export default function DashboardTime() {
   const { timeId } = useParams<{ timeId: string }>()
@@ -44,61 +44,43 @@ function DashboardTimeContent({ timeNum, userRole }: { timeNum: string; userRole
   const [tpvTotal, setTpvTotal]       = useState(0)
   const [meta, setMeta]               = useState(1_000_000)
   const [evolucao, setEvolucao]       = useState<{ dia: string; label: string; tpv: number; acumulado: number }[]>([])
-  const [porCloser, setPorCloser]     = useState<Record<string, number>>({})
-  const [porSdr, setPorSdr]           = useState<Record<string, number>>({})
-  const [users, setUsers]             = useState<DbUser[]>([])
-  const [teams, setTeams]             = useState<DbTeam[]>([])
+  const [membros, setMembros]         = useState<MembroTPV[]>([])
   const [editingMeta, setEditingMeta] = useState(false)
   const [metaDraft, setMetaDraft]     = useState('')
   const [savingMeta, setSavingMeta]   = useState(false)
 
-  // Resolve team ID from name "Time 01" / "Time 02" / "Time 03"
   const teamName = `Time ${timeNum}`
-  const team     = teams.find(t => t.name === teamName)
-  const teamId   = team?.id ?? null
 
   useEffect(() => {
-    async function load() {
-      setIsLoading(true)
-      const [{ data: usrs }, { data: tms }] = await Promise.all([
-        supabase.from('users').select('id,name,email,role,team_id').order('name'),
-        supabase.from('teams').select('id,name'),
-      ])
-      if (usrs) setUsers(usrs as DbUser[])
-      if (tms)  setTeams(tms as DbTeam[])
-    }
-    load()
-  }, [])
+    setIsLoading(true)
+    setTpvTotal(0)
+    setEvolucao([])
+    setMembros([])
 
-  useEffect(() => {
-    if (!teamId) return
     async function load() {
-      const [{ tpvTotal: tv }, metaVal, ev, { porCloser: pc, porSdr: ps }] = await Promise.all([
-        getAtivacoesDoTime(teamId!),
+      const [{ tpvTotal: tv }, metaVal, ev, membrosTPV] = await Promise.all([
+        getTPVDoTime(timeNum),
         getMetaTime(timeNum),
-        getEvolucaoDiariaDoTime(teamId!),
-        getTPVPorMembroDoTime(teamId!),
+        getEvolucaoDiaria(timeNum),
+        getTPVPorMembro(timeNum),
       ])
       setTpvTotal(tv)
       setMeta(metaVal)
       setEvolucao(ev)
-      setPorCloser(pc)
-      setPorSdr(ps)
+      setMembros(membrosTPV)
       setIsLoading(false)
     }
     load()
-  }, [teamId, timeNum])
+  }, [timeNum])
 
-  const pct        = meta > 0 ? Math.min(100, Math.round((tpvTotal / meta) * 100)) : 0
-  const projecao   = calcularProjecao(evolucao)
-  const membros    = useMemo(() => users.filter(u => u.team_id === teamId), [users, teamId])
+  const pct          = meta > 0 ? Math.min(100, Math.round((tpvTotal / meta) * 100)) : 0
+  const projecao     = calcularProjecao(evolucao)
+  const progressColor = pct >= 100 ? '#22C55E' : pct >= 70 ? '#F59E0B' : 'var(--action)'
 
   const barData = useMemo(() =>
     evolucao.slice(-14).map(e => ({ label: e.label, value: e.tpv })),
     [evolucao],
   )
-
-  const progressColor = pct >= 100 ? '#22C55E' : pct >= 70 ? '#F59E0B' : 'var(--action)'
 
   async function saveMeta() {
     const val = Number(metaDraft.replace(/\D/g, ''))
@@ -128,7 +110,7 @@ function DashboardTimeContent({ timeNum, userRole }: { timeNum: string; userRole
       <Header />
       <div className="page-wrap">
 
-        {/* ── Cabeçalho + abas de time ───────────────────────────────── */}
+        {/* ── Cabeçalho + abas ───────────────────────────────────────── */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24, flexWrap: 'wrap' }}>
           <Button variant="ghost" icon={ChevronLeft} onClick={() => navigate('/dashboards')}>Voltar</Button>
           <h1 style={{ fontSize: 22, fontWeight: 800, flex: 1 }}>Dashboard — {teamName}</h1>
@@ -148,10 +130,10 @@ function DashboardTimeContent({ timeNum, userRole }: { timeNum: string; userRole
 
         {/* ── KPIs ───────────────────────────────────────────────────── */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12, marginBottom: 24 }}>
-          <KpiCard label="TPV Acumulado"   value={BRL(tpvTotal)}       icon={TrendingUp} color="var(--green)"  />
-          <KpiCard label="Meta do Período" value={BRL(meta)}           icon={Target}     color="var(--action)" />
-          <KpiCard label="% da Meta"       value={`${pct}%`}           icon={Zap}        color={progressColor} />
-          <KpiCard label="Membros no Time" value={membros.length}      icon={Users}      color="var(--purple)" />
+          <KpiCard label="TPV Acumulado"   value={BRL(tpvTotal)}  icon={TrendingUp} color="var(--green)"  />
+          <KpiCard label="Meta do Período" value={BRL(meta)}      icon={Target}     color="var(--action)" />
+          <KpiCard label="% da Meta"       value={`${pct}%`}      icon={Zap}        color={progressColor} />
+          <KpiCard label="Membros no Time" value={membros.length} icon={Users}      color="var(--purple)" />
         </div>
 
         {/* ── Barra de progresso ─────────────────────────────────────── */}
@@ -179,7 +161,6 @@ function DashboardTimeContent({ timeNum, userRole }: { timeNum: string; userRole
             <span>Meta: {BRL(meta)}</span>
           </div>
 
-          {/* Editar meta inline */}
           {editingMeta && (
             <div style={{ display: 'flex', gap: 8, marginTop: 14, alignItems: 'center' }}>
               <input
@@ -226,32 +207,27 @@ function DashboardTimeContent({ timeNum, userRole }: { timeNum: string; userRole
 
         {/* ── Membros + Gráfico de linha ─────────────────────────────── */}
         <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 16, marginBottom: 20 }}>
-          {/* Membros */}
           <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 20 }}>
             <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 14 }}>Membros do Time</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {membros.length === 0 && (
                 <div style={{ color: 'var(--text2)', fontSize: 13 }}>Nenhum membro cadastrado.</div>
               )}
-              {membros.map(m => {
-                const tpvMembro = (m.email ? (porCloser[m.email] ?? 0) + (porSdr[m.email] ?? 0) : 0)
-                return (
-                  <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <Avatar name={m.name} size={34} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.name}</div>
-                      <div style={{ fontSize: 11, color: 'var(--text2)' }}>{m.role}</div>
-                    </div>
-                    <div style={{ fontWeight: 700, fontSize: 12, color: tpvMembro > 0 ? 'var(--green)' : 'var(--text2)', whiteSpace: 'nowrap' }}>
-                      {BRL(tpvMembro)}
-                    </div>
+              {membros.map(m => (
+                <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <Avatar name={m.name} size={34} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.name}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text2)' }}>{m.role}</div>
                   </div>
-                )
-              })}
+                  <div style={{ fontWeight: 700, fontSize: 12, color: m.tpv_total > 0 ? 'var(--green)' : 'var(--text2)', whiteSpace: 'nowrap' }}>
+                    {BRL(m.tpv_total)}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
 
-          {/* Gráfico de evolução acumulada */}
           <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 20 }}>
             <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 12 }}>Evolução do TPV (Acumulado)</div>
             {evolucao.length > 0
@@ -261,7 +237,7 @@ function DashboardTimeContent({ timeNum, userRole }: { timeNum: string; userRole
           </div>
         </div>
 
-        {/* ── Gráfico de barras por dia ──────────────────────────────── */}
+        {/* ── Gráfico de barras ──────────────────────────────────────── */}
         <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, padding: 20, marginBottom: 20 }}>
           <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 12 }}>TPV por Dia (últimos 14 dias)</div>
           {barData.length > 0
@@ -270,7 +246,7 @@ function DashboardTimeContent({ timeNum, userRole }: { timeNum: string; userRole
           }
         </div>
 
-        {/* ── Ranking de membros por TPV ─────────────────────────────── */}
+        {/* ── Contribuição Individual ────────────────────────────────── */}
         <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 14, overflow: 'hidden' }}>
           <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', fontWeight: 700, fontSize: 14 }}>
             Contribuição Individual
@@ -287,13 +263,8 @@ function DashboardTimeContent({ timeNum, userRole }: { timeNum: string; userRole
                 {membros.length === 0 && (
                   <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--text2)', padding: 32 }}>Sem membros.</td></tr>
                 )}
-                {membros
-                  .map(m => ({
-                    ...m,
-                    tpvCloser: m.email ? (porCloser[m.email] ?? 0) : 0,
-                    tpvSdr:    m.email ? (porSdr[m.email]    ?? 0) : 0,
-                  }))
-                  .sort((a, b) => (b.tpvCloser + b.tpvSdr) - (a.tpvCloser + a.tpvSdr))
+                {[...membros]
+                  .sort((a, b) => b.tpv_total - a.tpv_total)
                   .map((m, i) => (
                     <tr key={m.id}>
                       <td style={{ fontWeight: 800, color: i < 3 ? (['var(--gold)', '#C0C0C0', '#CD7F32'][i]) : 'var(--text2)' }}>{i + 1}</td>
@@ -304,10 +275,10 @@ function DashboardTimeContent({ timeNum, userRole }: { timeNum: string; userRole
                         </div>
                       </td>
                       <td style={{ color: 'var(--text2)', fontSize: 13 }}>{m.role}</td>
-                      <td style={{ fontWeight: 600, color: m.tpvCloser > 0 ? 'var(--green)' : 'var(--text2)' }}>{BRL(m.tpvCloser)}</td>
-                      <td style={{ fontWeight: 600, color: m.tpvSdr    > 0 ? 'var(--cyan)'  : 'var(--text2)' }}>{BRL(m.tpvSdr)}</td>
-                      <td style={{ fontWeight: 800, color: (m.tpvCloser + m.tpvSdr) > 0 ? 'var(--text)' : 'var(--text2)' }}>
-                        {BRL(m.tpvCloser + m.tpvSdr)}
+                      <td style={{ fontWeight: 600, color: m.tpv_closer > 0 ? 'var(--green)' : 'var(--text2)' }}>{BRL(m.tpv_closer)}</td>
+                      <td style={{ fontWeight: 600, color: m.tpv_sdr    > 0 ? 'var(--cyan)'  : 'var(--text2)' }}>{BRL(m.tpv_sdr)}</td>
+                      <td style={{ fontWeight: 800, color: m.tpv_total  > 0 ? 'var(--text)'  : 'var(--text2)' }}>
+                        {BRL(m.tpv_total)}
                       </td>
                     </tr>
                   ))}
