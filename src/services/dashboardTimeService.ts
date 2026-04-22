@@ -14,7 +14,7 @@ import { supabase } from '@/lib/supabase/client'
 // Data de início da nova regra de bonificação
 const DATA_INICIO_REGRA = new Date('2026-04-01T00:00:00.000Z')
 
-const TIMES_UUID: { [nome: string]: string } = {
+export const TIMES_UUID: { [nome: string]: string } = {
   '01': '63d33c9a-fad3-4095-8be6-39f84dda7519',
   '02': 'c37cfdfe-755c-428e-b132-13fd7c90ea7b',
   '03': '92f0c8fa-03c6-46e5-b97a-5ef544a9e183',

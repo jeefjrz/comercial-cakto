@@ -11,6 +11,7 @@ import Agenda from './pages/Agenda'
 import Dashboards from './pages/Dashboards'
 import Configuracoes from './pages/Configuracoes'
 import DashboardTime from './pages/DashboardTime'
+import DashboardLifetime from './pages/DashboardLifetime'
 import PublicForm from './pages/PublicForm'
 
 const MAIN_DOMAINS = [
@@ -64,6 +65,7 @@ export default function App() {
       <Route path="/agenda" element={<ProtectedRoute><Agenda /></ProtectedRoute>} />
       <Route path="/dashboards" element={<ProtectedRoute><Dashboards /></ProtectedRoute>} />
       <Route path="/dashboard/time/:timeId" element={<ProtectedRoute><DashboardTime /></ProtectedRoute>} />
+      <Route path="/dashboard/lifetime" element={<ProtectedRoute><DashboardLifetime /></ProtectedRoute>} />
       <Route path="/configuracoes" element={<ProtectedRoute><Configuracoes /></ProtectedRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

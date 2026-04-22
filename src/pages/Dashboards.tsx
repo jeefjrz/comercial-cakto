@@ -91,6 +91,8 @@ function DashboardsContent() {
     { num: '03', color: '#A78BFA' },
   ];
 
+  const lifetimeCard = { title: 'Dashboard Lifetime', desc: 'TPV total de clientes pós 30 dias de ativação.', color: '#22D3EE', path: '/dashboard/lifetime' };
+
   return (
     <>
       <Header />
@@ -118,6 +120,27 @@ function DashboardsContent() {
               <div style={{ fontSize: 12, fontWeight: 600, color: tc.color }}>Abrir dashboard →</div>
             </div>
           ))}
+        </div>
+
+        {/* Dashboard Lifetime */}
+        <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.08em', color: 'var(--text2)', marginBottom: 12 }}>
+          Lifetime
+        </div>
+        <div style={{ marginBottom: 28 }}>
+          <div className="card-hover" onClick={() => navigate(lifetimeCard.path)} style={{
+            background: 'var(--bg-card)', border: `1px solid var(--border)`, borderRadius: 14, padding: 20,
+            cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 280,
+          }}>
+            <div style={{ width: 42, height: 42, borderRadius: 10, background: `color-mix(in srgb, ${lifetimeCard.color} 15%, transparent)`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <TrendingUp size={20} color={lifetimeCard.color} />
+            </div>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>{lifetimeCard.title}</div>
+              <div style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.4 }}>{lifetimeCard.desc}</div>
+            </div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: lifetimeCard.color }}>Abrir dashboard →</div>
+          </div>
         </div>
 
         {/* Dashboards de painel */}
