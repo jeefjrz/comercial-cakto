@@ -10,9 +10,14 @@
  * - 2108: TPV por canal do time (team_id + janela de datas)
  * - 2109: TPV diário de um cliente (email)
  */
-const METABASE_URL = import.meta.env.VITE_METABASE_URL as string
-const METABASE_API_KEY = import.meta.env.VITE_METABASE_API_KEY as string
-const CARD_TPV = Number(import.meta.env.VITE_METABASE_CARD_TPV) // 2107
+// Fallback hardcoded para garantir funcionamento em produção
+const METABASE_URL     = import.meta.env.VITE_METABASE_URL     ?? 'https://team.cakto.app'
+const METABASE_API_KEY = import.meta.env.VITE_METABASE_API_KEY ?? ''
+const CARD_TPV         = Number(import.meta.env.VITE_METABASE_CARD_TPV) || 2107
+
+if (!import.meta.env.VITE_METABASE_URL) {
+  console.warn('[Metabase] VITE_METABASE_URL não configurado — usando fallback https://team.cakto.app')
+}
 
 export async function getTPVporAtivacao(
   clienteEmail: string,

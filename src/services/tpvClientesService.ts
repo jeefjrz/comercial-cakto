@@ -93,20 +93,39 @@ export async function sincronizarClientesDoTime(timeId: string): Promise<void> {
 
     const { tpv } = await getTPVCliente(ativacao.email, ativacao.date, 30)
 
-    await supabase.from('tpv_clientes').upsert({
-      ativacao_id:         ativacao.id,
-      cliente_email:       ativacao.email,
-      closer_email:        (ativacao.closer as { email: string } | null)?.email ?? null,
-      sdr_email:           (ativacao.sdr    as { email: string } | null)?.email ?? null,
-      time_id:             `Time ${timeId}`,
-      canal:               ativacao.channel ?? null,
-      data_ativacao:       ativacao.date,
-      data_fim:            dataFim.toISOString().split('T')[0],
-      tpv_atual:           tpv,
+    // Verificar se já existe (para não sobrescrever removido_manualmente)
+    const { data: existente } = await supabase
+      .from('tpv_clientes')
+      .select('removido_manualmente')
+      .eq('ativacao_id', ativacao.id)
+      .maybeSingle()
+
+    // Se foi removido manualmente, apenas atualiza tpv_atual e status
+    if (existente?.removido_manualmente) {
+      await supabase.from('tpv_clientes')
+        .update({ tpv_atual: tpv, status, ultima_atualizacao: new Date().toISOString() })
+        .eq('ativacao_id', ativacao.id)
+      continue
+    }
+
+    const { error: upsertErr } = await supabase.from('tpv_clientes').upsert({
+      ativacao_id:          ativacao.id,
+      cliente_email:        ativacao.email,
+      closer_email:         (ativacao.closer as { email: string } | null)?.email ?? null,
+      sdr_email:            (ativacao.sdr    as { email: string } | null)?.email ?? null,
+      time_id:              `Time ${timeId}`,
+      canal:                ativacao.channel ?? null,
+      data_ativacao:        ativacao.date,
+      data_fim:             dataFim.toISOString().split('T')[0],
+      tpv_atual:            tpv,
       status,
       removido_manualmente: false,
-      ultima_atualizacao:  new Date().toISOString(),
+      ultima_atualizacao:   new Date().toISOString(),
     }, { onConflict: 'ativacao_id' })
+
+    if (upsertErr) {
+      console.error('[tpvClientes] Erro no upsert:', JSON.stringify(upsertErr))
+    }
   }
 }
 
