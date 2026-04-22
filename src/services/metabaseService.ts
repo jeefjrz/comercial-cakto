@@ -3,21 +3,15 @@
  *
  * O Metabase atua como intermediário entre o sistema comercial
  * e o banco de pagamentos do DataCrazy. Todas as consultas de TPV
- * são feitas via API do Metabase, nunca diretamente ao DataCrazy.
+ * são feitas via Edge Function calcular-tpv (proxy server-side),
+ * nunca diretamente do browser — evita CORS.
  *
  * Cards:
  * - 2107: TPV por cliente (email + janela de datas)
  * - 2108: TPV por canal do time (team_id + janela de datas)
  * - 2109: TPV diário de um cliente (email)
  */
-// Fallback hardcoded para garantir funcionamento em produção
-const METABASE_URL     = import.meta.env.VITE_METABASE_URL     ?? 'https://team.cakto.app'
-const METABASE_API_KEY = import.meta.env.VITE_METABASE_API_KEY ?? ''
-const CARD_TPV         = Number(import.meta.env.VITE_METABASE_CARD_TPV) || 2107
-
-if (!import.meta.env.VITE_METABASE_URL) {
-  console.warn('[Metabase] VITE_METABASE_URL não configurado — usando fallback https://team.cakto.app')
-}
+import { supabase } from '@/lib/supabase/client'
 
 export async function getTPVporAtivacao(
   clienteEmail: string,
@@ -29,19 +23,15 @@ export async function getTPVporAtivacao(
   dataFim.setDate(dataFim.getDate() + janelaDias)
 
   try {
-    const response = await fetch(`${METABASE_URL}/api/card/${CARD_TPV}/query`, {
-      method: 'POST',
-      headers: { 'x-api-key': METABASE_API_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        parameters: [
-          { type: 'text',        value: clienteEmail,                              target: ['variable', ['template-tag', 'email']]       },
-          { type: 'date/single', value: dataInicio.toISOString().split('T')[0],    target: ['variable', ['template-tag', 'data_inicio']] },
-          { type: 'date/single', value: dataFim.toISOString().split('T')[0],       target: ['variable', ['template-tag', 'data_fim']]    },
-        ],
-      }),
+    const { data, error } = await supabase.functions.invoke('calcular-tpv', {
+      body: {
+        cliente_email: clienteEmail,
+        data_inicio:   dataInicio.toISOString().split('T')[0],
+        data_fim:      dataFim.toISOString().split('T')[0],
+      },
     })
-    const data = await response.json()
-    return Number(data?.data?.rows?.[0]?.[2] ?? 0)
+    if (error) throw error
+    return Number(data?.tpv ?? 0)
   } catch (error) {
     console.error('[Metabase] Erro ao buscar TPV:', error)
     return 0
@@ -86,20 +76,11 @@ export async function getTPVCliente(
   dataFim.setDate(dataFim.getDate() + janelaDias)
   const dataFimStr = dataFim.toISOString().split('T')[0]
   try {
-    const response = await fetch(`${METABASE_URL}/api/card/2107/query`, {
-      method: 'POST',
-      headers: { 'x-api-key': METABASE_API_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        parameters: [
-          { type: 'text',        value: email,      target: ['variable', ['template-tag', 'email']]       },
-          { type: 'date/single', value: dataInicio, target: ['variable', ['template-tag', 'data_inicio']] },
-          { type: 'date/single', value: dataFimStr, target: ['variable', ['template-tag', 'data_fim']]    },
-        ],
-      }),
+    const { data, error } = await supabase.functions.invoke('calcular-tpv', {
+      body: { cliente_email: email, data_inicio: dataInicio, data_fim: dataFimStr },
     })
-    const data = await response.json()
-    const row = data?.data?.rows?.[0]
-    return { tpv: Number(row?.[2] ?? 0), nome: row?.[1] ?? email }
+    if (error) throw error
+    return { tpv: Number(data?.tpv ?? 0), nome: email }
   } catch { return { tpv: 0, nome: email } }
 }
 
@@ -110,46 +91,27 @@ export async function getTPVCanal(
   dataFim: string,
 ): Promise<{ inbound: number; outbound: number; indicacao: number; total: number }> {
   try {
-    const response = await fetch(`${METABASE_URL}/api/card/2108/query`, {
-      method: 'POST',
-      headers: { 'x-api-key': METABASE_API_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        parameters: [
-          { type: 'text',        value: teamUuid,   target: ['variable', ['template-tag', 'team_id']]     },
-          { type: 'date/single', value: dataInicio, target: ['variable', ['template-tag', 'data_inicio']] },
-          { type: 'date/single', value: dataFim,    target: ['variable', ['template-tag', 'data_fim']]    },
-        ],
-      }),
+    const { data, error } = await supabase.functions.invoke('calcular-tpv', {
+      body: { team_uuid: teamUuid, data_inicio: dataInicio, data_fim: dataFim },
     })
-    const data = await response.json()
-    const rows: unknown[][] = data?.data?.rows ?? []
-    const result = { inbound: 0, outbound: 0, indicacao: 0, total: 0 }
-    rows.forEach(row => {
-      const canal = String(row[0]).toLowerCase()
-      const tpv   = Number(row[1] ?? 0)
-      if (canal.includes('inbound'))   result.inbound   += tpv
-      else if (canal.includes('outbound'))  result.outbound  += tpv
-      else if (canal.includes('indica'))    result.indicacao += tpv
-      result.total += tpv
-    })
-    return result
+    if (error) throw error
+    return {
+      inbound:   Number(data?.inbound   ?? 0),
+      outbound:  Number(data?.outbound  ?? 0),
+      indicacao: Number(data?.indicacao ?? 0),
+      total:     Number(data?.total     ?? 0),
+    }
   } catch { return { inbound: 0, outbound: 0, indicacao: 0, total: 0 } }
 }
 
 // ─── Card 2109 — TPV diário de um cliente ────────────────────────────────────
 export async function getTPVDiario(email: string): Promise<number> {
   try {
-    const response = await fetch(`${METABASE_URL}/api/card/2109/query`, {
-      method: 'POST',
-      headers: { 'x-api-key': METABASE_API_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        parameters: [
-          { type: 'text', value: email, target: ['variable', ['template-tag', 'email']] },
-        ],
-      }),
+    const { data, error } = await supabase.functions.invoke('calcular-tpv', {
+      body: { tpv_diario: true, cliente_email: email },
     })
-    const data = await response.json()
-    return Number(data?.data?.rows?.[0]?.[0] ?? 0)
+    if (error) throw error
+    return Number(data?.tpv ?? 0)
   } catch { return 0 }
 }
 

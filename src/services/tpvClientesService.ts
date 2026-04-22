@@ -7,8 +7,18 @@
  * Dados de TPV vêm do Metabase (card 2107) via getTPVCliente.
  */
 import { supabase } from '@/lib/supabase/client'
-import { getTPVCliente } from './metabaseService'
 import { TIMES_UUID } from './dashboardTimeService'
+
+// Busca TPV via Edge Function (evita CORS do Metabase direto)
+async function buscarTPVCliente(email: string, dataInicio: string, dataFim: string): Promise<number> {
+  try {
+    const { data, error } = await supabase.functions.invoke('calcular-tpv', {
+      body: { cliente_email: email, data_inicio: dataInicio, data_fim: dataFim },
+    })
+    if (error) throw error
+    return Number(data?.tpv ?? 0)
+  } catch { return 0 }
+}
 
 const DATA_CORTE = '2026-04-01'
 
@@ -91,7 +101,13 @@ export async function sincronizarClientesDoTime(timeId: string): Promise<void> {
     dataFim.setDate(dataFim.getDate() + 30)
     const status = dataFim < hoje ? 'expirado' : 'ativo'
 
-    const { tpv } = await getTPVCliente(ativacao.email, ativacao.date, 30)
+    const dataFimTpv = new Date(ativacao.date)
+    dataFimTpv.setDate(dataFimTpv.getDate() + 30)
+    const tpv = await buscarTPVCliente(
+      ativacao.email,
+      ativacao.date.split('T')[0],
+      dataFimTpv.toISOString().split('T')[0],
+    )
 
     // Verificar se já existe (para não sobrescrever removido_manualmente)
     const { data: existente } = await supabase

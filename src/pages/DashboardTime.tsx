@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ChevronLeft, Loader2, Pencil, Check, X, TrendingUp, Users, Target, Zap, RefreshCw } from 'lucide-react'
 import { useAuth } from '@/lib/authContext'
@@ -71,9 +71,11 @@ function DashboardTimeContent({ timeNum, userRole }: { timeNum: string; userRole
 
   const teamName  = `Time ${timeNum}`
   const teamUuid  = TIMES_UUID[timeNum] ?? ''
+  const loadedRef = useRef(false)
 
   // ── Load principal ──────────────────────────────────────────────────────────
   useEffect(() => {
+    loadedRef.current = false
     setIsLoading(true)
     setTpvTotal(0); setEvolucao([]); setMembros([])
     setClientes([]); setCanal({ inbound: 0, outbound: 0, indicacao: 0, total: 0 }); setTpvHoje(0)
@@ -82,6 +84,8 @@ function DashboardTimeContent({ timeNum, userRole }: { timeNum: string; userRole
     const dataFim    = new Date().toISOString().split('T')[0]
 
     async function load() {
+      if (loadedRef.current) return
+      loadedRef.current = true
       const [{ tpvTotal: tv }, metaVal, ev, membrosTPV, clientesData, canalData] = await Promise.all([
         getTPVDoTime(timeNum),
         getMetaTime(timeNum),
