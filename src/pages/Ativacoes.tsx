@@ -21,7 +21,7 @@ type DbActivation = {
   channel: string; responsible: string; date: string; time: string | null
   sdr_id: string | null; sdr_nome: string | null
   // ATENÇÃO: a coluna `indicado_por` deve existir na tabela `activations` do Supabase.
-  // Se não existir, crie-a como: indicado_por uuid REFERENCES users(id) ON DELETE SET NULL
+  // Se não existir, crie-a como: indicado_por text
   indicado_por: string | null
 }
 type DbUser  = { id: string; name: string; email: string | null; role: string; team_id: string | null }
@@ -557,7 +557,7 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
                         <div>{a.client}</div>
                         {a.indicado_por && (
                           <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 2 }}>
-                            Indicado por: {getUserName(a.indicado_por)}
+                            Indicado por: {a.indicado_por}
                           </div>
                         )}
                       </td>
@@ -713,14 +713,15 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <p style={{ fontSize: 13, color: 'var(--text2)', margin: 0 }}>
-              Selecione quem foi o responsável por indicar esta ativação.
+              Informe o e-mail de quem indicou esta ativação.
             </p>
-            <Field label="Indicado por">
-              <Sel
+            <Field label="E-mail do indicador">
+              <input
+                className="inp"
+                type="email"
                 value={selectedIndicator}
-                onChange={v => setSelectedIndicator(v)}
-                options={users.map(u => ({ value: u.id, label: u.name }))}
-                placeholder="Selecione o responsável…"
+                onChange={e => setSelectedIndicator(e.target.value.toLowerCase())}
+                placeholder="indicador@email.com"
               />
             </Field>
           </div>
