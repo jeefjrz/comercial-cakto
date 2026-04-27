@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, Search, Eye, Edit, Trash2, ChevronLeft, ChevronRight, Loader2, Download, AlertTriangle } from 'lucide-react'
+import { Plus, Search, Eye, Edit, Trash2, ChevronLeft, ChevronRight, Loader2, Download, AlertTriangle, UserCheck } from 'lucide-react'
 import { useAuth } from '@/lib/authContext'
 import { useToast } from '@/components/ui/Toast'
 import { Header } from '@/components/Header'
@@ -20,6 +20,9 @@ type DbActivation = {
   id: string; client: string; email: string | null; phone: string | null
   channel: string; responsible: string; date: string; time: string | null
   sdr_id: string | null; sdr_nome: string | null
+  // ATENÇÃO: a coluna `indicado_por` deve existir na tabela `activations` do Supabase.
+  // Se não existir, crie-a como: indicado_por uuid REFERENCES users(id) ON DELETE SET NULL
+  indicado_por: string | null
 }
 type DbUser  = { id: string; name: string; email: string | null; role: string; team_id: string | null }
 type DbTeam  = { id: string; name: string }
@@ -102,6 +105,11 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
   const [modalDel, setModalDel] = useState<string | null>(null)
   const [form, setForm] = useState({ ...EMPTY_FORM })
 
+  // ── Indication modal state ────────────────────────────────────────────────
+  const [isIndicationModalOpen, setIsIndicationModalOpen] = useState(false)
+  const [selectedActivationForIndication, setSelectedActivationForIndication] = useState<string | null>(null)
+  const [selectedIndicator, setSelectedIndicator] = useState<string>('')
+
   // ── Re-fetch whenever date range changes ──────────────────────────────────
   useEffect(() => {
     if (!dateRange.startDate || !dateRange.endDate) return
@@ -110,7 +118,7 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
       const [{ data: acts, error: ae }, { data: usrs, error: ue }, { data: tms }] = await Promise.all([
         supabase
           .from('activations')
-          .select('id,client,email,phone,channel,responsible,date,time,sdr_id,sdr_nome')
+          .select('id,client,email,phone,channel,responsible,date,time,sdr_id,sdr_nome,indicado_por')
           .gte('date', dateRange.startDate)
           .lte('date', dateRange.endDate)
           .order('date', { ascending: false })
@@ -292,6 +300,24 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
     setActivations(p => p.filter(a => a.id !== modalDel))
     toast('Ativação removida.', 'info')
     setModalDel(null)
+  }
+
+  const handleSaveIndication = async () => {
+    if (!selectedActivationForIndication || !selectedIndicator) {
+      toast('Selecione um responsável pela indicação.', 'error'); return
+    }
+    const { error } = await supabase
+      .from('activations')
+      .update({ indicado_por: selectedIndicator })
+      .eq('id', selectedActivationForIndication)
+    if (error) { toast(error.message, 'error'); return }
+    setActivations(p => p.map(a =>
+      a.id === selectedActivationForIndication ? { ...a, indicado_por: selectedIndicator } : a
+    ))
+    toast('Indicação salva com sucesso!', 'success')
+    setIsIndicationModalOpen(false)
+    setSelectedActivationForIndication(null)
+    setSelectedIndicator('')
   }
 
   // ── Form fields (variable — evita unmount no re-render) ───────────────────
@@ -527,7 +553,14 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
                   return (
                     <tr key={a.id}>
                       <td style={{ fontSize: 12, color: 'var(--text2)' }}>{formatDate(a.date)} {a.time}</td>
-                      <td style={{ fontWeight: 600 }}>{a.client}</td>
+                      <td style={{ fontWeight: 600 }}>
+                        <div>{a.client}</div>
+                        {a.indicado_por && (
+                          <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 2 }}>
+                            Indicado por: {getUserName(a.indicado_por)}
+                          </div>
+                        )}
+                      </td>
                       <td style={{ fontSize: 12, color: 'var(--text2)' }}>{a.email}</td>
                       <td><Badge label={a.channel} color={CHANNEL_COLORS[a.channel] || 'var(--action)'} /></td>
                       <td>
@@ -555,6 +588,16 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
                           </button>
                           {isAdmin && (
                             <>
+                              <button title="Definir Indicação"
+                                onClick={() => {
+                                  setSelectedActivationForIndication(a.id)
+                                  setSelectedIndicator(a.indicado_por || '')
+                                  setIsIndicationModalOpen(true)
+                                }}
+                                style={{ background: 'none', border: 'none', cursor: 'pointer',
+                                  color: a.indicado_por ? 'var(--green)' : 'var(--text2)', padding: 4, borderRadius: 6 }}>
+                                <UserCheck size={16} />
+                              </button>
                               <button title="Editar"
                                 onClick={() => {
                                   setForm({ ...a, email: a.email || '', phone: a.phone || '',
@@ -648,6 +691,40 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
 
         <ConfirmModal open={!!modalDel} onClose={() => setModalDel(null)} onConfirm={doDelete}
           description="Deseja excluir esta ativação permanentemente?" />
+
+        {/* ── Modal: Responsável pela Indicação ── */}
+        <Modal
+          open={isIndicationModalOpen}
+          onClose={() => {
+            setIsIndicationModalOpen(false)
+            setSelectedActivationForIndication(null)
+            setSelectedIndicator('')
+          }}
+          title="Responsável pela Indicação"
+          width={440}
+          footer={<>
+            <Button variant="secondary" onClick={() => {
+              setIsIndicationModalOpen(false)
+              setSelectedActivationForIndication(null)
+              setSelectedIndicator('')
+            }}>Cancelar</Button>
+            <Button onClick={handleSaveIndication}>Salvar</Button>
+          </>}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <p style={{ fontSize: 13, color: 'var(--text2)', margin: 0 }}>
+              Selecione quem foi o responsável por indicar esta ativação.
+            </p>
+            <Field label="Indicado por">
+              <Sel
+                value={selectedIndicator}
+                onChange={v => setSelectedIndicator(v)}
+                options={users.map(u => ({ value: u.id, label: u.name }))}
+                placeholder="Selecione o responsável…"
+              />
+            </Field>
+          </div>
+        </Modal>
       </div>
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </>
