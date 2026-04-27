@@ -303,16 +303,22 @@ function AtivacoesContent({ isAdmin, currentUser }: { isAdmin: boolean; currentU
   }
 
   const handleSaveIndication = async () => {
-    if (!selectedActivationForIndication || !selectedIndicator) {
-      toast('Selecione um responsável pela indicação.', 'error'); return
+    if (!selectedActivationForIndication || !selectedIndicator.trim()) {
+      toast('Informe o e-mail do indicador.', 'error'); return
     }
+    const indicadorEmail = String(selectedIndicator).trim().toLowerCase()
+    const payload: Record<string, string> = { indicado_por: indicadorEmail }
     const { error } = await supabase
       .from('activations')
-      .update({ indicado_por: selectedIndicator })
+      .update(payload)
       .eq('id', selectedActivationForIndication)
-    if (error) { toast(error.message, 'error'); return }
+      .select()
+    if (error) {
+      console.error('Erro Supabase [handleSaveIndication]:', error.message, error.details, error.hint)
+      toast(error.message, 'error'); return
+    }
     setActivations(p => p.map(a =>
-      a.id === selectedActivationForIndication ? { ...a, indicado_por: selectedIndicator } : a
+      a.id === selectedActivationForIndication ? { ...a, indicado_por: indicadorEmail } : a
     ))
     toast('Indicação salva com sucesso!', 'success')
     setIsIndicationModalOpen(false)
